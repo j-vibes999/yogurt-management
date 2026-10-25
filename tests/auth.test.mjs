@@ -5,7 +5,7 @@ import { createCredentialTag, signSession, verifySession, verifySessionCredentia
 const secret = "test-secret-that-is-definitely-longer-than-thirty-two-chars";
 const passwordHash = "synthetic-password-hash-before-reset";
 const credentialTag = await createCredentialTag("u1", passwordHash, secret);
-const base = { userId: "u1", email: "owner@example.test", fullName: "Owner", role: "admin", credentialTag };
+const base = { userId: "u1", sid: "s".repeat(43), email: "owner@example.test", fullName: "Owner", role: "admin", credentialTag };
 
 test("signed session verifies", async () => {
   const token = await signSession({ ...base, exp: Math.floor(Date.now() / 1000) + 60 }, secret);

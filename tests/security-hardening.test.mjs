@@ -33,7 +33,7 @@ test("login limiter key normalizes email casing",()=>{
 
 test("middleware keeps cross-site mutation and security-header guards",()=>{
   const source=read("middleware.ts");
-  for(const marker of ["sec-fetch-site","Cross-site request blocked","X-Content-Type-Options","X-Frame-Options","Permissions-Policy","/api/health"]) assert.ok(source.includes(marker),`missing ${marker}`);
+  for(const marker of ["sec-fetch-site","ຄຳຂໍຈາກເວັບໄຊອື່ນຖືກປິດກັ້ນ","X-Content-Type-Options","X-Frame-Options","Permissions-Policy","/api/health"]) assert.ok(source.includes(marker),`missing ${marker}`);
 });
 
 test("database integrity migration protects core accounting and stock quantities",()=>{

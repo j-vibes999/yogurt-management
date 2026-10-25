@@ -39,7 +39,8 @@ test("sold stock retains the delivered lot costs and FEFO returns do not become 
   ]);
   const result = await consumeFridgeLots(f.tx, { ...identity, currentStock: 10, unitsSold: 4, expiredReturned: 1 });
   // One early cup is returned; two early and two later cups are sold.
-  assert.deepEqual(result, { subtotalCost: 220, unitCost: 55, costKnown: true, unknownCostUnits: 0 });
+  // The returned early cup keeps its own cost as a loss.
+  assert.deepEqual(result, { subtotalCost: 220, unitCost: 55, costKnown: true, unknownCostUnits: 0, expiredCost: 10, expiredUnknownUnits: 0 });
   assert.deepEqual(f.lots.map(lot => lot.quantityRemaining), [0, 5]);
   assert.equal(f.lots.reduce((sum, lot) => sum + lot.quantityRemaining, 0), 10 - 4 - 1);
 });
@@ -47,7 +48,7 @@ test("sold stock retains the delivered lot costs and FEFO returns do not become 
 test("an actual zero-cost lot is known and never becomes an unknown-cost estimate", async () => {
   const f = fixture([stock("free", 3, "0")]);
   const result = await consumeFridgeLots(f.tx, { ...identity, currentStock: 3, unitsSold: 2, expiredReturned: 0 });
-  assert.deepEqual(result, { subtotalCost: 0, unitCost: 0, costKnown: true, unknownCostUnits: 0 });
+  assert.deepEqual(result, { subtotalCost: 0, unitCost: 0, costKnown: true, unknownCostUnits: 0, expiredCost: 0, expiredUnknownUnits: 0 });
   assert.equal(f.lots[0].quantityRemaining, 1);
 });
 
@@ -74,5 +75,5 @@ test("lot reconciliation refuses more recorded stock than the audited inventory"
 test("sub-cent delivered costs accumulate before the sold-line total is rounded", async () => {
   const f = fixture([stock("small", 1000, "0.0040")]);
   const result = await consumeFridgeLots(f.tx, { ...identity, currentStock: 1000, unitsSold: 1000, expiredReturned: 0 });
-  assert.deepEqual(result, { subtotalCost: 4, unitCost: .004, costKnown: true, unknownCostUnits: 0 });
+  assert.deepEqual(result, { subtotalCost: 4, unitCost: .004, costKnown: true, unknownCostUnits: 0, expiredCost: 0, expiredUnknownUnits: 0 });
 });

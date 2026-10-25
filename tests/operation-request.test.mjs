@@ -40,7 +40,9 @@ function deferredResponse() {
   return { promise, resolve, reject };
 }
 async function waitForRequests(requests, count) {
-  for (let attempts = 0; attempts < 100 && requests.length < count; attempts++) await new Promise(resolve => setImmediate(resolve));
+  // Hashing the body runs off the main thread, so wait on the clock rather than a fixed number of turns.
+  const deadline = Date.now() + 2000;
+  while (requests.length < count && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(requests.length, count, `expected ${count} outgoing mutation requests`);
 }
 

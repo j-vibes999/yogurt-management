@@ -71,7 +71,7 @@ function fixture({ price = "0.05", balance = "0.00", auditFails = false, expense
     "@/lib/server-session": { getCurrentSession: async () => ({ userId: "admin", role: "admin" }) },
     "@/lib/logger": { logError() {} },
     "@/lib/refill-summary": { refilledSinceAudit: async () => new Map() },
-    "@/lib/stock-cost": { consumeFridgeLots: async () => ({ unitCost: 0, subtotalCost: 0, costKnown: true, unknownCostUnits: 0, ...cost }) },
+    "@/lib/stock-cost": { consumeFridgeLots: async () => ({ unitCost: 0, subtotalCost: 0, costKnown: true, unknownCostUnits: 0, expiredCost: 0, expiredUnknownUnits: 0, ...cost }) },
     "@/lib/audit": { writeAuditLog: async (input, transaction) => { assert.equal(transaction, tx, "audit must share the mutation transaction"); if (auditFails) throw new Error("Injected audit failure"); state.audits.push(input); } },
     "@/lib/transaction": { withSerializableTransaction: async (work) => { const before = structuredClone(state); try { return await work(tx); } catch (error) { state = before; throw error; } } },
   };
