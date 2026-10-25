@@ -34,6 +34,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         const raw = String(body.currentStoreId ?? "").trim();
         const requestedStoreId = raw || null;
         if (requestedStoreId !== fridge.currentStoreId && stockTotal > 0) throw new Error("FRIDGE_HAS_STOCK");
+        // Payments are recorded against the store's fridge, so a store that still owes money keeps its
+        // fridge until the balance is collected. Otherwise the balance could not be paid and the store could not close.
+        if (requestedStoreId !== fridge.currentStoreId && fridge.currentStoreId) {
+          const latest = await tx.settlement.findFirst({ where: { storeId: fridge.currentStoreId }, orderBy: [{ settlementDate: "desc" }, { id: "desc" }], select: { closingBalance: true } });
+          if (latest && Number(latest.closingBalance) > 0) throw new Error(`STORE_HAS_BALANCE:${Number(latest.closingBalance)}`);
+        }
         if (requestedStoreId) {
           const target = await tx.store.findUnique({ where: { id: requestedStoreId }, include: { fridge: true } });
           if (!target || !target.isActive) throw new Error("STORE_NOT_FOUND");
@@ -57,7 +63,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       });
 
       if (currentStoreId && currentStoreId !== fridge.currentStoreId) {
-        await tx.fridgeInventory.updateMany({ where: { fridgeId: fridge.id }, data: { storeId: currentStoreId } });
+        // The fridge arrives empty, so deliveries to the new store count from now on.
+        await tx.fridgeInventory.updateMany({ where: { fridgeId: fridge.id }, data: { storeId: currentStoreId, lastAuditDate: new Date() } });
+        // A moved fridge needs a (zero) row for every active product so the next audit can count it.
+        const existing = new Set(fridge.inventory.map((row) => row.finishedProductId));
+        const products = await tx.finishedProduct.findMany({ where: { isActive: true }, select: { id: true } });
+        for (const product of products) {
+          if (!existing.has(product.id)) await tx.fridgeInventory.create({ data: { storeId: currentStoreId, fridgeId: fridge.id, finishedProductId: product.id, currentStock: 0 } });
+        }
       }
       await writeAuditLog({
         userId: session.userId, action: "update", entityType: "fridge", entityId: updated.id,
@@ -77,6 +90,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ error: message }, { status: 409 });
     }
     const code = error instanceof Error ? error.message : "UNKNOWN";
+    if (code.startsWith("STORE_HAS_BALANCE:")) {
+      const balance = Number(code.split(":")[1] ?? 0);
+      return NextResponse.json({ error: `ຮ້ານທີ່ຕູ້ນີ້ຕິດຕັ້ງຢູ່ຍັງມີຍອດຄ້າງ ${balance.toLocaleString("en-US")} LAK. ກະລຸນາຮັບເງິນໃຫ້ຄົບກ່ອນຖອດ ຫຼືຍ້າຍຕູ້`, code: "STORE_HAS_BALANCE", retryable: false }, { status: 409 });
+    }
     const messages: Record<string, string> = {
       FRIDGE_NOT_FOUND: "ບໍ່ພົບຕູ້ແຊ່ນີ້",
       STORE_NOT_FOUND: "ບໍ່ພົບຮ້ານປາຍທາງ ຫຼືຮ້ານຖືກປິດໃຊ້",

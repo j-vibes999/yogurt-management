@@ -9,12 +9,12 @@ const privateHeaders = { "Cache-Control": "private, no-store, max-age=0", "X-Con
 
 async function download(context: Context, head: boolean) {
   const session = await getCurrentSession();
-  if (!session) return NextResponse.json({ error: "Authentication required" }, { status: 401, headers: privateHeaders });
-  if (session.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: privateHeaders });
+  if (!session) return NextResponse.json({ error: "ກະລຸນາເຂົ້າລະບົບກ່ອນ" }, { status: 401, headers: privateHeaders });
+  if (session.role !== "admin") return NextResponse.json({ error: "ບັນຊີນີ້ບໍ່ມີສິດເບິ່ງໃບບິນ" }, { status: 403, headers: privateHeaders });
   const { name } = await context.params;
   try {
     const receipt = await openReceipt(name);
-    if (!receipt) return NextResponse.json({ error: "Receipt not found" }, { status: 404, headers: privateHeaders });
+    if (!receipt) return NextResponse.json({ error: "ບໍ່ພົບໃບບິນ" }, { status: 404, headers: privateHeaders });
     const headers = { ...privateHeaders, "Content-Type": receipt.mimeType, "Content-Length": String(receipt.size), "Content-Disposition": `inline; filename="${name}"` };
     if (head) {
       await receipt.handle.close();
@@ -24,7 +24,7 @@ async function download(context: Context, head: boolean) {
     return new NextResponse(stream, { headers });
   } catch (error) {
     console.error("Unable to read receipt", error);
-    return NextResponse.json({ error: "Unable to read receipt" }, { status: 500, headers: privateHeaders });
+    return NextResponse.json({ error: "ເປີດໃບບິນບໍ່ໄດ້" }, { status: 500, headers: privateHeaders });
   }
 }
 

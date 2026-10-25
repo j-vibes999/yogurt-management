@@ -1,59 +1,53 @@
-# Yogurt Ops — Consignment Back Office
+# Yogurt Super Web (YoguManage)
 
-Next.js + TypeScript back-office MVP for yogurt consignment operations.
+Operations system for a yogurt consignment business: production, raw materials, store fridges,
+refills, driver audits and payments, expenses, reports and alerts. The interface is in Lao.
 
-## Phase 1 included
+Next.js 15 (App Router) · React 19 · TypeScript · Prisma 6 · PostgreSQL 16.
 
-- Operations dashboard
-- Partner store registry with per-store commission rate
-- Fridge asset registry and store assignment
-- Mobile-first weekly driver visit list
-- Per-store restock/audit flow by flavor
-- Live sales reconciliation using the specified formula
-- Gross sales, store commission and net payable summary
-- Demo-mode draft/completion persistence in browser localStorage
-- PostgreSQL-ready Prisma schema covering all requested Phase 1–4 entities
+## How production runs on this Mac
 
-## Core formula
+- PostgreSQL 16 (Homebrew service) holds the database `yogurt_ops`.
+- A launchd job runs `.yogurt/start-server-public.sh` (`next start` on `127.0.0.1:3000`).
+- A Cloudflare tunnel publishes port 3000 at the public URL.
+- launchd jobs `com.yogurt.manager.health` (every 5 minutes), `com.yogurt.manager.backup` (03:15 daily)
+  and `com.yogurt.manager.backup-verify` (Sunday 03:45) run the scripts in `scripts/`.
 
-`unitsSold = (previousStock + countRefilled) - countRemaining - countExpiredReturned`
+## Everyday tasks (double-click)
 
-`gross = unitsSold * retailPrice`
+| File | What it does |
+| --- | --- |
+| `Apply Yogurt Update.command` | Tests → database backup → stop → `npm ci` if `package-lock.json` changed → build → `prisma migrate deploy` → start → health check. Puts the previous version back if any step after the stop fails. The site is offline for 1–3 minutes. |
+| `Start Yogurt Web.command` / `Stop Yogurt Web.command` / `Yogurt Web Status.command` | Control the production server through its launchd job (`scripts/server-control.sh`). |
+| `Change Password.command` | Set a new password (15+ characters) for an account; signs out its earlier sessions and lifts a lockout. |
+| `Setup Yogurt Database.command` | One-time setup of PostgreSQL, `.env`, migrations and the first build on a new Mac. |
+| `Start Yogurt App.command` | Development server on `http://127.0.0.1:3005` (never on 3000, which the tunnel publishes). |
 
-`storeCommission = gross * commissionRate`
+## Configuration (`.env`)
 
-`netPayable = gross - storeCommission`
+See `.env.example`. Required: `DATABASE_URL`, `SESSION_SECRET` (32+ random characters).
+Optional: `ADMIN_EMAIL`/`ADMIN_PASSWORD` (first setup only), `HEALTH_TOKEN`, `PUBLIC_BASE_URL`,
+`HEALTH_ALERT_AFTER`, `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, `ALERT_WEBHOOK_URL`,
+`BACKUP_OFFSITE_DIR`, `BACKUP_PASSPHRASE`.
 
-The UI blocks closing a visit when any SKU produces negative `unitsSold`, because that indicates a reconciliation discrepancy.
+## Development
 
-## Run locally
+```sh
+npm ci
+npm run dev -- -p 3005        # or Start Yogurt App.command
+npm run verify                # prisma validate, eslint, tsc, unit tests, next build
+npm run test:e2e:business     # copies the database, then runs the business and regression E2E tests on it
+```
 
-1. Install Node.js 20+ and npm.
-2. Run `npm install`.
-3. Run `npm run dev`.
-4. Open `http://localhost:3000`.
+Schema changes go through migrations (`npx prisma migrate dev --name <change>` on a development
+database); production applies them with `prisma migrate deploy` during an update. Never run
+`prisma db push` against the production database.
 
-The Phase 1 UI runs with demo data and does not require a database connection.
+More detail: `DATABASE_SETUP.md` (setup, data rules, backups, alerts), `PRODUCT.md`, `DESIGN.md`.
 
-## Enable PostgreSQL / Prisma
+## Business rules in short
 
-1. Copy `.env.example` to `.env` and set `DATABASE_URL`.
-2. Run `npm run prisma:generate`.
-3. Create the first migration with `npx prisma migrate dev --name init`.
-4. Replace `src/data/demo.ts` reads with Prisma repositories/server actions.
-
-## Key routes
-
-- `/` — operations dashboard
-- `/stores` — partner store registry
-- `/fridges` — fridge asset registry
-- `/driver` — weekly visit list
-- `/driver/restock/[storeId]` — mobile audit/restock flow
-
-## Database note
-
-The requested draft schema identified fridge inventory by `store_id`. This implementation also includes `fridge_id` and a unique constraint on `(fridge_id, finished_product_id)` so a store can safely operate more than one fridge without mixing inventory balances.
-
-## Next implementation step
-
-Phase 2 should persist completed visits transactionally, update `fridge_inventory`, create `settlements`, generate the Weekly Consignment Statement, and export the statement to PDF/image for LINE sharing.
+- `unitsSold = previousStock − countRemaining − countExpiredReturned` (refills are already in `previousStock`).
+- `gross = unitsSold × retailPrice`, `storeCommission = gross × commissionRate`, `netPayable = gross − storeCommission`, all in exact cents.
+- A store's stock is the stock of the fridge that stands in it now. Returned expired cups and central
+  write-offs keep their lot or batch cost, and reports subtract that cost from profit.

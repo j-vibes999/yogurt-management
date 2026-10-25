@@ -34,7 +34,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         ...(parsed.data.role === undefined ? {} : { role: parsed.data.role }),
         ...(parsed.data.isActive === undefined ? {} : { isActive: parsed.data.isActive }),
         ...(passwordHash === undefined ? {} : { passwordHash }),
+        // A password reset or reactivation by an admin also lifts a login lockout.
+        ...(passwordHash === undefined && parsed.data.isActive !== true ? {} : { failedLoginCount: 0, lockedUntil: null }),
       } });
+      // Signed cookies stay valid until they expire, so revoke this user's session rows explicitly.
+      if (passwordHash !== undefined || parsed.data.isActive === false) await tx.userSession.deleteMany({ where: { userId: id } });
       await writeAuditLog({
         userId: session.userId, action: "update", entityType: "user", entityId: id, summary: `ແກ້ໄຂຜູ້ໃຊ້ ${after.email}`,
         metadata: { before: { fullName: before.fullName, role: before.role, isActive: before.isActive }, after: { fullName: after.fullName, role: after.role, isActive: after.isActive, passwordReset: Boolean(passwordHash) } },

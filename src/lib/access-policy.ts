@@ -10,6 +10,12 @@ export function rolesForPage(pathname:string):UserRole[]|null{
   return null;
 }
 
+/** Whether a role may open a page link; used to hide dashboard cards, alerts and search hits it cannot use. */
+export function canRoleOpen(role:UserRole|null|undefined,href:string):boolean{
+  const allowed=rolesForPage(href.split(/[?#]/,1)[0]);
+  return !allowed||(role!=null&&allowed.includes(role));
+}
+
 export function rolesForApi(pathname:string,method:string):UserRole[]|null{
   if(pathname==='/api/health'||pathname==='/api/session') return null;
   if(pathname.startsWith('/api/metrics/web-vitals')||pathname.startsWith('/api/shell-state')||pathname.startsWith('/api/nav-counts')||pathname.startsWith('/api/notifications')||pathname.startsWith('/api/search')||pathname.startsWith('/api/map/search')||pathname.startsWith('/api/auth/logout')) return null;

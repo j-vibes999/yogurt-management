@@ -20,7 +20,8 @@ export async function POST(request: Request) {
       if(!batch||batch.status!=="completed") throw new Error("BATCH_NOT_FOUND");
       if(quantity>batch.quantityRemaining) throw new Error("INSUFFICIENT_BATCH_STOCK");
       await tx.productionBatch.update({where:{id:batch.id},data:{quantityRemaining:{decrement:quantity}}});
-      const adjustment=await tx.finishedGoodsAdjustment.create({data:{productionBatchId:batch.id,finishedProductId:batch.finishedProductId,quantity,reason,note:note||null,createdById:session.userId}});
+      // Keep the batch unit cost with the write-off so reports can subtract the loss.
+      const adjustment=await tx.finishedGoodsAdjustment.create({data:{productionBatchId:batch.id,finishedProductId:batch.finishedProductId,quantity,reason,note:note||null,createdById:session.userId,unitCost:batch.unitCost,costKnown:batch.costKnown}});
       await writeAuditLog({userId:session.userId,action:"waste",entityType:"production_batch",entityId:batch.id,summary:reason+" · "+quantity+" cups · "+batch.batchNumber,metadata:{quantity,reason,note,beforeStock:batch.quantityRemaining,afterStock:batch.quantityRemaining-quantity}},tx);
       return {id:adjustment.id};
     }));

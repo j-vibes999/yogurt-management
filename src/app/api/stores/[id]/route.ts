@@ -29,16 +29,24 @@ async function ensureStoreCanDeactivate(tx: Prisma.TransactionClient, id: string
     include: {
       refillRequests: { where: { status: { notIn: ["completed", "cancelled"] } }, take: 1 },
       settlements: { orderBy: [{ settlementDate: "desc" }, { id: "desc" }], take: 1 },
+      fridge: { include: { inventory: { select: { currentStock: true } } } },
     },
   });
   if (!store) throw new Error("STORE_NOT_FOUND");
   if (store.refillRequests.length) throw new Error("STORE_HAS_PENDING_REFILLS");
   if (Number(store.settlements[0]?.closingBalance ?? 0) > 0) throw new Error("STORE_HAS_BALANCE");
+  // An inactive store can no longer be audited, so cups left in its fridge would be stuck for good.
+  const cupsInFridge = (store.fridge?.inventory ?? []).reduce((sum, row) => sum + row.currentStock, 0);
+  if (cupsInFridge > 0) throw new Error(`STORE_HAS_STOCK:${cupsInFridge}`);
   return store;
 }
 
 function storeError(error: unknown) {
   const code = (error as { code?: string })?.code === "P2025" ? "STORE_NOT_FOUND" : error instanceof Error ? error.message : "UNKNOWN";
+  if (code.startsWith("STORE_HAS_STOCK:")) {
+    const cups = Number(code.split(":")[1] ?? 0);
+    return NextResponse.json({ error: `ຕູ້ຂອງຮ້ານນີ້ຍັງມີສິນຄ້າ ${cups.toLocaleString("en-US")} ຖ້ວຍ. ກ່ອນປິດຮ້ານ ກະລຸນາກວດຮ້ານຮອບສຸດທ້າຍ ແລະບັນທຶກສິນຄ້າທີ່ເອົາອອກຈາກຕູ້ໃນຊ່ອງ “ເສຍ / ໝົດອາຍຸ” ຈົນຈຳນວນຄົງເຫຼືອເປັນ 0`, code: "STORE_HAS_STOCK", retryable: false }, { status: 409 });
+  }
   const messages: Record<string, string> = {
     STORE_NOT_FOUND: "ບໍ່ພົບຮ້ານ",
     STORE_HAS_PENDING_REFILLS: "ກະລຸນາສົ່ງໃຫ້ສຳເລັດ ຫຼືຍົກເລີກຄຳຂໍເຕີມສິນຄ້າທີ່ຍັງຄ້າງກ່ອນປິດຮ້ານ",

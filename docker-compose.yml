@@ -1,12 +1,14 @@
+# Optional local PostgreSQL for development (production uses the Homebrew service).
+# Set POSTGRES_PASSWORD in your shell or a .env file next to this file before `docker compose up`.
 services:
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: yogurt_ops
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - yogurt_postgres_data:/var/lib/postgresql/data
     healthcheck:

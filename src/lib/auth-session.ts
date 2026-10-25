@@ -2,6 +2,8 @@ export type UserRole = "admin" | "production" | "driver";
 
 export type SessionPayload = {
   userId: string;
+  /** Random id of this login; the server keeps one row per id so logout can revoke the cookie. */
+  sid: string;
   email: string;
   fullName: string;
   role: UserRole;
@@ -11,6 +13,7 @@ export type SessionPayload = {
 
 export const SESSION_COOKIE = "yogurt_session";
 const encoder = new TextEncoder();
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 function base64UrlEncode(bytes: Uint8Array) {
   let binary = "";
@@ -47,6 +50,11 @@ export async function verifySessionCredentials(payload: SessionPayload, password
   }
 }
 
+/** 32 random bytes, base64url: unguessable and safe to store as the session row id. */
+export function createSessionId() {
+  return base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+}
+
 export function getSessionSecret() {
   const secret = process.env.SESSION_SECRET;
   return secret && secret.length >= 32 ? secret : null;
@@ -69,6 +77,7 @@ export async function verifySession(token: string | undefined, secret: string): 
     if (!valid) return null;
     const payload = JSON.parse(new TextDecoder().decode(base64UrlDecode(body))) as SessionPayload;
     if (!payload || typeof payload !== "object" || typeof payload.userId !== "string" || !payload.userId ||
+      typeof payload.sid !== "string" || !SESSION_ID_PATTERN.test(payload.sid) ||
       typeof payload.email !== "string" || typeof payload.fullName !== "string" ||
       !["admin", "production", "driver"].includes(payload.role) ||
       typeof payload.credentialTag !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(payload.credentialTag) ||

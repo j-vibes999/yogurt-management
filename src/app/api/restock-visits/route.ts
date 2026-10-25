@@ -21,12 +21,12 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json().catch(() => null);
-    if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ error: "Invalid restock request", retryable: false }, { status: 400 });
+    if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ error: "ຂໍ້ມູນການກວດຮ້ານບໍ່ຖືກຕ້ອງ", retryable: false }, { status: 400 });
     const storeId = String(body.storeId ?? "").trim();
     const fridgeAssetCode = String(body.fridgeAssetCode ?? "").trim();
     const inputLines = Array.isArray(body.lines) ? body.lines : [];
     const requestedPaidCents = body.paidAmount === undefined ? BigInt(0) : parseMoneyCents(body.paidAmount);
-    if (requestedPaidCents === null) return NextResponse.json({ error: "Paid amount must be non-negative money with at most two decimal places.", retryable: false }, { status: 400 });
+    if (requestedPaidCents === null) return NextResponse.json({ error: "ຈຳນວນເງິນທີ່ຮັບຕ້ອງບໍ່ຕິດລົບ ແລະມີທົດສະນິຍົມບໍ່ເກີນ 2 ຕຳແໜ່ງ", retryable: false }, { status: 400 });
     const requestedPaidAmount = moneyNumber(requestedPaidCents);
     const expectedFinancialSnapshot = body.expectedFinancialSnapshot;
     const requestedMethod = body.paymentMethod === "bank" ? "bank" : body.paymentMethod === "cash" ? "cash" : null;
@@ -41,8 +41,8 @@ export async function POST(request: Request) {
     const session = await getCurrentSession();
     if (!session || !["admin", "driver"].includes(session.role)) return NextResponse.json({ error: "ບໍ່ມີສິດເຮັດລາຍການນີ້" }, { status: 403 });
     const key = request.headers.get("idempotency-key");
-    if (!key) return NextResponse.json({ error: "Restock request key is required", retryable: false }, { status: 400 });
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)) return NextResponse.json({ error: "Invalid restock request key", retryable: false }, { status: 400 });
+    if (!key) return NextResponse.json({ error: "ບໍ່ພົບລະຫັດຄຳຂໍ; ກະລຸນາໂຫຼດໜ້າຄືນແລ້ວລອງໃໝ່", retryable: false }, { status: 400 });
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)) return NextResponse.json({ error: "ລະຫັດຄຳຂໍບໍ່ຖືກຕ້ອງ; ກະລຸນາໂຫຼດໜ້າຄືນແລ້ວລອງໃໝ່", retryable: false }, { status: 400 });
     const stableReceipt = `ST-${key.replaceAll("-", "").toUpperCase()}`;
     const requestPayload = [storeId, fridgeAssetCode, inputLines, requestedPaidAmount, requestedMethod];
     if (expectedFinancialSnapshot !== undefined) requestPayload.push(expectedFinancialSnapshot);
@@ -65,7 +65,9 @@ export async function POST(request: Request) {
         where: { id: storeId },
         include: {
           fridge: true,
-          fridgeInventory: { include: { finishedProduct: true } },
+          // Only the rows of the fridge that stands in this store now. Rows left behind by a fridge
+          // that moved away must not be counted again.
+          fridgeInventory: { where: { fridge: { currentStoreId: storeId } }, include: { finishedProduct: true } },
           settlements: { orderBy: [{ settlementDate: "desc" }, { id: "desc" }], take: 1 },
         },
       });
@@ -119,7 +121,7 @@ export async function POST(request: Request) {
         const { unitsSold } = line;
         const lineGrossCents = assertMoneyRange(roundMoneyCents(String(inventory.finishedProduct.retailPrice)) * BigInt(unitsSold));
 
-        const { unitCost, subtotalCost, costKnown, unknownCostUnits } = await consumeFridgeLots(tx, {
+        const { unitCost, subtotalCost, costKnown, unknownCostUnits, expiredCost, expiredUnknownUnits } = await consumeFridgeLots(tx, {
           storeId: store.id, fridgeId: store.fridge.id, productId: inventory.finishedProductId,
           currentStock: inventory.currentStock, unitsSold, expiredReturned: countExpiredReturned,
         });
@@ -139,6 +141,8 @@ export async function POST(request: Request) {
           subtotalCost: moneyDecimalString(lineCostCents),
           costKnown,
           unknownCostUnits,
+          expiredCost: moneyDecimalString(assertMoneyRange(roundMoneyCents(expiredCost))),
+          expiredUnknownUnits,
         });
         inventoryUpdates.push({ id: inventory.id, currentStock: countRemaining });
       }
@@ -211,21 +215,22 @@ export async function POST(request: Request) {
   } catch (error) {
     const code = error instanceof Error ? error.message : "UNKNOWN";
     const status = ["STALE_INVENTORY", "STALE_FINANCIAL_SNAPSHOT"].includes(code) ? 409 : code === "STORE_OR_FRIDGE_NOT_FOUND" ? 404 : 400;
+    // Drivers read Lao, so every message shown on the audit screen is in Lao.
     const messages: Record<string, string> = {
-      INVALID_FINANCIAL_SNAPSHOT: "The audit financial snapshot is incomplete or invalid.",
-      STALE_FINANCIAL_SNAPSHOT: "Prices, commission or the previous balance changed after this screen was opened. Reload and confirm the new amounts before completing the visit.",
-      MONEY_OUT_OF_RANGE: "The amount exceeds the supported monetary range.",
-      STALE_INVENTORY: "Stock or completed refill deliveries changed after this audit screen was opened. Reload the page before completing the visit.",
-      STORE_OR_FRIDGE_NOT_FOUND: "Store or assigned fridge was not found.",
-      STORE_INACTIVE: "This store is inactive.",
-      INCOMPLETE_AUDIT_LINES: "Every product in the fridge must be counted before completion.",
-      INVALID_AUDIT_COUNTS: "Audit quantities must be non-negative whole numbers.",
-      NEGATIVE_SALES: "Audit counts produce a negative sold quantity.",
-      PAYMENT_EXCEEDS_BALANCE: "Paid amount cannot exceed the total amount due.",
-      IDEMPOTENCY_CONFLICT: "This restock request key was used for a different visit.",
-      STOCK_LOT_MISMATCH: "The recorded stock lots differ from the fridge count. Reload and reconcile stock before completing the visit.",
+      INVALID_FINANCIAL_SNAPSHOT: "ຂໍ້ມູນລາຄາ ແລະຍອດເງິນທີ່ສົ່ງມາບໍ່ຄົບ ຫຼືບໍ່ຖືກຕ້ອງ; ກະລຸນາໂຫຼດໜ້າຄືນ",
+      STALE_FINANCIAL_SNAPSHOT: "ລາຄາ, ອັດຕາສ່ວນແບ່ງ ຫຼືຍອດຄ້າງເດີມປ່ຽນແປງຫຼັງຈາກເປີດໜ້ານີ້; ກະລຸນາໂຫຼດໜ້າຄືນ ແລະກວດຍອດໃໝ່ກ່ອນປິດຮອບ",
+      MONEY_OUT_OF_RANGE: "ຈຳນວນເງິນເກີນຂອບເຂດທີ່ລະບົບຮອງຮັບ",
+      STALE_INVENTORY: "ຈຳນວນສິນຄ້າໃນຕູ້ ຫຼືການເຕີມສິນຄ້າປ່ຽນແປງຫຼັງຈາກເປີດໜ້ານີ້; ກະລຸນາໂຫຼດໜ້າຄືນກ່ອນປິດຮອບ",
+      STORE_OR_FRIDGE_NOT_FOUND: "ບໍ່ພົບຮ້ານ ຫຼືຕູ້ແຊ່ທີ່ຕິດຕັ້ງຢູ່ຮ້ານນີ້",
+      STORE_INACTIVE: "ຮ້ານນີ້ຖືກປິດໃຊ້ແລ້ວ",
+      INCOMPLETE_AUDIT_LINES: "ກະລຸນານັບສິນຄ້າທຸກລາຍການໃນຕູ້ກ່ອນປິດຮອບ",
+      INVALID_AUDIT_COUNTS: "ຈຳນວນທີ່ນັບຕ້ອງເປັນຈຳນວນເຕັມທີ່ບໍ່ຕິດລົບ",
+      NEGATIVE_SALES: "ຈຳນວນທີ່ນັບເຮັດໃຫ້ຍອດຂາຍຕິດລົບ; ກະລຸນາກວດຈຳນວນອີກຄັ້ງ",
+      PAYMENT_EXCEEDS_BALANCE: "ຈຳນວນເງິນທີ່ຮັບເກີນຍອດທີ່ຕ້ອງຮັບ",
+      IDEMPOTENCY_CONFLICT: "ລະຫັດຄຳຂໍນີ້ຖືກໃຊ້ກັບການກວດຮ້ານອື່ນແລ້ວ; ກະລຸນາໂຫຼດໜ້າຄືນ",
+      STOCK_LOT_MISMATCH: "ຂໍ້ມູນລັອດສິນຄ້າບໍ່ກົງກັບຈຳນວນໃນຕູ້; ກະລຸນາໂຫຼດໜ້າຄືນ ແລະແຈ້ງຜູ້ຈັດການ",
     };
     logError("restock.complete_failed", { error });
-    return NextResponse.json({ error: messages[code] ?? "Unable to complete restock visit", retryable: !messages[code] }, { status: ["IDEMPOTENCY_CONFLICT", "STORE_INACTIVE", "STOCK_LOT_MISMATCH"].includes(code) ? 409 : messages[code] ? status : 500 });
+    return NextResponse.json({ error: messages[code] ?? "ບໍ່ສາມາດປິດຮອບກວດໄດ້; ກະລຸນາລອງໃໝ່", code: messages[code] ? code : undefined, retryable: !messages[code] }, { status: ["IDEMPOTENCY_CONFLICT", "STORE_INACTIVE", "STOCK_LOT_MISMATCH"].includes(code) ? 409 : messages[code] ? status : 500 });
   }
 }
