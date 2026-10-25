@@ -1,0 +1,111 @@
+.sign-in-screen {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(400px, 1fr);
+  min-height: 100svh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-lao), sans-serif;
+  letter-spacing: 0;
+}
+.sign-in-screen *, .sign-in-screen *::before, .sign-in-screen *::after { box-sizing: border-box; }
+.sign-in-story {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 40px clamp(32px, 5vw, 88px) 24px;
+  background: var(--primary-soft);
+  border-right: 1px solid var(--line);
+}
+.sign-in-brand { display: flex; align-items: center; gap: 12px; }
+.sign-in-brand strong { min-width: 0; overflow-wrap: anywhere; font-size: clamp(19px, 1.8vw, 24px); font-weight: 700; }
+.sign-in-brand-mark { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: var(--primary); color: white; flex: 0 0 auto; }
+.sign-in-story-body { width: 100%; max-width: 580px; margin: 48px auto 40px; }
+.sign-in-eyebrow { display: block; color: var(--primary); font-size: 13px; font-weight: 650; }
+.sign-in-story-title { margin: 12px 0 16px; color: var(--sidebar); font-size: clamp(25px, 2.4vw, 34px); line-height: 1.5; font-weight: 700; text-wrap: balance; }
+.sign-in-story-description { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.8; }
+.sign-in-artwork { position: relative; margin: 24px -24px 0; padding-bottom: 36px; }
+.sign-in-scene { animation: sign-in-float 8s cubic-bezier(.45, 0, .55, 1) infinite; }
+.sign-in-scene img { display: block; width: 100%; height: auto; user-select: none; }
+.sign-in-artwork[data-motion="paused"] .sign-in-scene { animation-play-state: paused; }
+.sign-in-motion { display: flex; align-items: center; gap: 7px; margin: 4px auto 0; padding: 6px 10px; min-height: 36px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; touch-action: manipulation; }
+.sign-in-motion svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.sign-in-domains { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 24px; padding-top: 16px; border-top: 1px solid var(--line-strong); font-size: 12px; font-weight: 650; }
+.sign-in-domains span { display: inline-flex; align-items: center; gap: 8px; }
+.sign-in-domains span::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
+.sign-in-domains span:nth-child(2) { color: var(--info); }
+.sign-in-domains span:nth-child(2)::before { background: var(--info); }
+.sign-in-domains span:nth-child(3) { color: var(--warning); }
+.sign-in-domains span:nth-child(3)::before { background: var(--accent); }
+.sign-in-story-footer { margin: 0; color: var(--muted); font-size: 12px; }
+.sign-in-region { display: grid; place-items: center; padding: 64px 32px; min-width: 0; }
+.sign-in-panel { width: 100%; max-width: 440px; padding: 40px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 12px 40px rgb(23 59 49 / 5%); animation: sign-in-appear 240ms cubic-bezier(.23, 1, .32, 1) both; }
+.sign-in-panel-heading { margin-bottom: 32px; }
+.sign-in-panel-heading h1 { margin: 8px 0 12px; }
+.sign-in-panel-heading p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.75; }
+.sign-in-form { display: grid; gap: 20px; }
+.sign-in-field { display: grid; gap: 8px; min-width: 0; }
+.sign-in-field label { color: var(--text); font-size: 14px; font-weight: 600; }
+.sign-in-input-row { display: flex; align-items: center; min-height: 56px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); transition: border-color 150ms ease, box-shadow 150ms ease; }
+.sign-in-input-row:focus-within { border-color: var(--primary); outline: 2px solid var(--primary); outline-offset: 2px; box-shadow: 0 0 0 3px var(--ui-focus); }
+.sign-in-icon { display: grid; place-items: center; width: 48px; flex: 0 0 auto; color: var(--muted); }
+.sign-in-icon svg, .sign-in-eye svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.sign-in-input-row input { width: 100%; min-width: 0; min-height: 52px; padding: 12px 12px 12px 0; border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: 16px; outline: none; }
+/* Compatibility bridge: shared legacy input rules use !important. The row owns the border/focus surface. */
+.sign-in-screen .sign-in-input-row input,
+.sign-in-screen .sign-in-input-row input:focus { border: 0 !important; box-shadow: none !important; background: transparent !important; }
+.sign-in-eye { display: grid; place-items: center; min-width: 44px; height: 44px; margin-right: 4px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; touch-action: manipulation; }
+.sign-in-submit { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; min-height: 52px; margin-top: 4px; padding: 12px 20px; border: 1px solid var(--primary); border-radius: 8px; background: var(--primary); color: #fff; font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; transition: background-color 150ms ease, border-color 150ms ease, transform 120ms cubic-bezier(.23, 1, .32, 1); touch-action: manipulation; }
+.sign-in-submit svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform 150ms cubic-bezier(.23, 1, .32, 1); }
+.sign-in-submit:active:not(:disabled) { transform: scale(.985); }
+.sign-in-submit:disabled { cursor: wait; background: var(--primary-hover); border-color: var(--primary-hover); }
+/* Preserve readable pending text against the legacy global disabled opacity. */
+.sign-in-screen .sign-in-submit:disabled { opacity: 1 !important; }
+.sign-in-submit .sign-in-loading { animation: sign-in-spin 800ms linear infinite; }
+.sign-in-loading circle { opacity: .25; }
+.sign-in-help { display: flex; align-items: flex-start; gap: 12px; padding: 24px 0 0; margin-top: 32px; border-top: 1px solid var(--line); }
+.sign-in-help-icon { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 auto; border-radius: 8px; color: var(--primary); background: var(--primary-soft); font-weight: 700; }
+.sign-in-help strong { font-size: 13px; font-weight: 650; }
+.sign-in-help p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.75; }
+.sign-in-staff { margin: 24px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
+.sign-in-error { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--danger); border-radius: 8px; background: var(--danger-soft); color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }
+.sign-in-screen :is(button, a, .sign-in-error, .sign-in-panel):focus-visible { outline: 3px solid var(--primary); outline-offset: 3px; }
+.sign-in-skip { position: fixed; z-index: 5; top: 12px; left: 12px; padding: 12px 16px; border-radius: 8px; background: var(--surface); color: var(--primary); transform: translateY(-160%); }
+.sign-in-skip:focus { transform: translateY(0); }
+@media (hover: hover) and (pointer: fine) {
+  .sign-in-submit:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
+  .sign-in-submit:hover:not(:disabled) svg:not(.sign-in-loading) { transform: translateX(3px); }
+  .sign-in-eye:hover { background: var(--primary-soft); color: var(--primary); }
+  .sign-in-motion:hover { border-color: var(--line-strong); color: var(--text); }
+}
+@keyframes sign-in-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@keyframes sign-in-appear { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes sign-in-spin { to { transform: rotate(360deg); } }
+@media (max-width: 1050px) {
+  .sign-in-screen { grid-template-columns: minmax(0, 1fr) minmax(360px, 1fr); }
+  .sign-in-story { padding-inline: 32px; }
+  .sign-in-region { padding-inline: 24px; }
+  .sign-in-panel { padding: 32px; }
+  .sign-in-artwork { margin-inline: -16px; }
+}
+@media (max-width: 760px) {
+  .sign-in-screen { display: flex; flex-direction: column; }
+  .sign-in-story { padding: calc(24px + env(safe-area-inset-top)) 24px 24px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .sign-in-brand strong { font-size: 20px; }
+  .sign-in-brand-mark { width: 40px; height: 40px; }
+  .sign-in-story-body { display: none; }
+  .sign-in-story-footer { display: none; }
+  .sign-in-region { flex: 1; padding: 40px 24px calc(40px + env(safe-area-inset-bottom)); }
+  .sign-in-panel { padding: 32px; box-shadow: none; }
+  .sign-in-panel-heading { margin-bottom: 28px; }
+}
+@media (max-width: 420px) {
+  .sign-in-region { padding-inline: 16px; }
+  .sign-in-panel { padding: 28px 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sign-in-scene, .sign-in-panel, .sign-in-submit .sign-in-loading { animation: none; }
+  .sign-in-motion { display: none; }
+  .sign-in-submit, .sign-in-submit svg { transition: none; }
+  .sign-in-submit:active:not(:disabled), .sign-in-submit:hover:not(:disabled) svg { transform: none; }
+}

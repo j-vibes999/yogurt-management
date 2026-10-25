@@ -1,0 +1,16 @@
+node_modules/
+.next/
+out/
+.env
+.env.local
+*.log
+.DS_Store
+.prisma/
+.yogurt/
+
+.repair-backups/
+*.bak
+
+.npm/
+.tmp/
+*.tsbuildinfo

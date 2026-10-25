@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="60 110 480 320" fill="none">
+  <defs>
+    <linearGradient id="cup-green" x1="141" y1="235" x2="330" y2="270" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#20754F"/>
+      <stop offset=".55" stop-color="#20754F"/>
+      <stop offset="1" stop-color="#173B31"/>
+    </linearGradient>
+    <linearGradient id="cup-mango" x1="330" y1="246" x2="456" y2="280" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F0BE72"/>
+      <stop offset=".6" stop-color="#E6AA50"/>
+      <stop offset="1" stop-color="#CC913D"/>
+    </linearGradient>
+    <linearGradient id="mango-flesh" x1="90" y1="331" x2="167" y2="371" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFD18A"/>
+      <stop offset="1" stop-color="#E6AA50"/>
+    </linearGradient>
+  </defs>
+
+  <!-- A quiet, grounded delivery base. -->
+  <ellipse cx="298" cy="397" rx="212" ry="15" fill="#173B31" fill-opacity=".07"/>
+  <path d="m96 374 348-14 57 18-348 15-57-19Z" fill="#DCE4D9"/>
+  <path d="m153 393 348-15v9l-348 15v-9Z" fill="#B7C6B8"/>
+  <path d="m96 374 57 19v9l-57-19v-9Z" fill="#C9D6C8"/>
+
+  <!-- The crate sits behind the cups, not in the form's visual path. -->
+  <path d="m323 286 118-8 49 23-118 9-49-24Z" fill="#EAF5ED" stroke="#B7C6B8" stroke-width="2" stroke-linejoin="round"/>
+  <path d="m372 310 118-9v66l-118 9v-66Z" fill="#C9DCCB" stroke="#B7C6B8" stroke-width="2" stroke-linejoin="round"/>
+  <path d="m323 286 49 24v66l-49-24v-66Z" fill="#B7CDBB" stroke="#A0BAA6" stroke-width="2" stroke-linejoin="round"/>
+  <path d="m331 305 33 16m-33 9 33 16m-33 9 33 16m17-42 100-8m-100 26 100-8m-100 26 100-8" stroke="#9DB9A3" stroke-width="3" stroke-linecap="round"/>
+  <path d="m409 318 44-3v11l-44 3v-11Z" fill="#EAF5ED" stroke="#A0BAA6" stroke-width="1.5" stroke-linejoin="round"/>
+
+  <!-- The smaller mango cup. -->
+  <g transform="rotate(8 386 274)">
+    <path d="M320 207h134l-15 138c-1 10-93 10-95 0l-24-138Z" fill="url(#cup-mango)"/>
+    <path d="m329 212 20 128c1 5 9 8 16 9l-18-135-18-2Z" fill="#FFF1D5" fill-opacity=".25"/>
+    <path d="M344 344c24 9 71 9 95 0" stroke="#B9863B" stroke-width="2" stroke-linecap="round"/>
+    <ellipse cx="387" cy="209" rx="68" ry="17" fill="#F8F6EF" stroke="#D5DCCF" stroke-width="2"/>
+    <ellipse cx="387" cy="205" rx="64" ry="14" fill="#FFFFFF"/>
+    <ellipse cx="387" cy="205" rx="53" ry="10" fill="#FFF1D5"/>
+    <path d="M348 204c19-6 51-6 78-1" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round"/>
+    <path d="M322 209c18 10 44 15 65 15 22 0 48-5 66-15" stroke="#DCE4D9" stroke-width="2" stroke-linecap="round"/>
+    <path d="M363 277c11-21 35-23 50-8-5 22-27 35-50 8Z" fill="#FFF1D5"/>
+    <path d="M367 277c10-14 28-19 43-9" stroke="#C58D38" stroke-width="2" stroke-linecap="round"/>
+    <path d="M388 258c-1-13 9-19 22-17-4 12-11 19-22 17Z" fill="#20754F"/>
+    <path d="m389 257 11-10" stroke="#EAF5ED" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M367 310h37" stroke="#8A5B17" stroke-width="2" stroke-linecap="round" stroke-opacity=".45"/>
+    <path d="M375 320h21" stroke="#8A5B17" stroke-width="2" stroke-linecap="round" stroke-opacity=".3"/>
+  </g>
+
+  <!-- Evergreen cup and the established cup-and-leaf brand mark. -->
+  <path d="M138 161h196l-26 195c-2 15-139 15-142 0l-28-195Z" fill="url(#cup-green)"/>
+  <path d="m149 170 25 181c1 6 9 10 19 12l-22-190-22-3Z" fill="#EAF5ED" fill-opacity=".1"/>
+  <path d="M166 353c32 12 109 12 142 0" stroke="#12362A" stroke-width="2" stroke-linecap="round"/>
+  <path d="M146 188c51 15 124 15 180 0" stroke="#EAF5ED" stroke-width="2" stroke-opacity=".22"/>
+  <path d="M169 334c34 10 103 10 140 0" stroke="#EAF5ED" stroke-width="2" stroke-opacity=".22"/>
+  <ellipse cx="236" cy="164" rx="101" ry="24" fill="#E7EEE6" stroke="#B7C6B8" stroke-width="2"/>
+  <ellipse cx="236" cy="158" rx="98" ry="23" fill="#FFFFFF" stroke="#DCE4D9" stroke-width="2"/>
+  <ellipse cx="236" cy="157" rx="86" ry="16" fill="#F8F6EF"/>
+  <path d="M172 155c34-9 88-9 126-1" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/>
+  <path d="M138 163c20 13 59 24 98 24 39 0 78-11 98-24" stroke="#B7C6B8" stroke-width="2" stroke-linecap="round"/>
+  <rect x="197" y="225" width="78" height="83" rx="12" fill="#EAF5ED"/>
+  <g transform="translate(207 236) scale(1.8)">
+    <path d="M7 13h18l-2.2 13H9.2L7 13Z" fill="#FFFFFF" stroke="#173B31" stroke-width="1.8" stroke-linejoin="round"/>
+    <path d="M6 13h20M11 19h10" stroke="#173B31" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M16 11c-1-5 3.1-7.5 8-7-1.4 4.7-3.8 7.1-8 7Z" fill="#E6AA50" stroke="#173B31" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="m16 11 4-4" stroke="#173B31" stroke-width="1.4" stroke-linecap="round"/>
+  </g>
+
+  <!-- A fresh mango wedge and two connected leaves. -->
+  <path d="M88 348c18-25 49-34 77-19-1 30-23 48-50 44-13-2-23-11-27-25Z" fill="#E6AA50"/>
+  <path d="M91 346c20-20 47-29 69-16-4 23-25 39-47 36-10-2-18-9-22-20Z" fill="url(#mango-flesh)" stroke="#FFF1D5" stroke-width="3" stroke-linejoin="round"/>
+  <path d="m109 337 15 24m1-30 14 20m-40-3 48-5" stroke="#D89437" stroke-width="1.5" stroke-linecap="round" stroke-opacity=".65"/>
+  <path d="M148 369c5-23 24-35 48-29-10 24-28 34-48 29Z" fill="#20754F"/>
+  <path d="M151 368c17-11 29-20 40-24" stroke="#EAF5ED" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M149 370c-20-5-28-18-25-35 19 3 30 17 25 35Z" fill="#5F946C"/>
+  <path d="m148 368-17-24" stroke="#EAF5ED" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

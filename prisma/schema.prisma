@@ -1,0 +1,478 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  admin
+  production
+  driver
+}
+
+enum RawMaterialCategory {
+  ingredient
+  packaging
+}
+
+enum ProductionBatchStatus {
+  completed
+  cancelled
+}
+
+enum FridgeStatus {
+  active
+  maintenance
+}
+
+enum RestockVisitStatus {
+  draft
+  completed
+}
+
+enum PaymentStatus {
+  pending
+  partial
+  paid
+}
+
+enum PaymentMethod {
+  cash
+  bank
+  mixed
+}
+
+enum RefillRequestStatus {
+  waiting
+  preparing
+  delivering
+  completed
+  cancelled
+}
+
+model User {
+  id             String          @id @default(cuid())
+  email          String          @unique
+  passwordHash   String          @map("password_hash")
+  role           UserRole
+  fullName       String          @map("full_name")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  isActive       Boolean         @default(true) @map("is_active")
+  lastLoginAt    DateTime?       @map("last_login_at")
+  purchaseOrders PurchaseOrder[]
+  restockVisits  RestockVisit[]
+  auditLogs       AuditLog[]
+  finishedGoodsAdjustments FinishedGoodsAdjustment[]
+  dailyClosings DailyClosing[]
+  operationReceipts OperationReceipt[]
+
+  @@map("users")
+}
+
+model RawMaterial {
+  id             String              @id @default(cuid())
+  code           String              @unique
+  name           String
+  category       RawMaterialCategory
+  unit           String
+  minStockAlert  Decimal             @default(0) @db.Decimal(14, 3) @map("min_stock_alert")
+  currentStock   Decimal             @default(0) @db.Decimal(14, 6) @map("current_stock")
+  avgCostPerUnit Decimal             @default(0) @db.Decimal(14, 4) @map("avg_cost_per_unit")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  isActive       Boolean             @default(true) @map("is_active")
+  purchaseItems  PurchaseOrderItem[]
+  recipeItems    RecipeItem[]
+  adjustments    RawMaterialAdjustment[]
+
+  @@map("raw_materials")
+}
+
+model PurchaseOrder {
+  id           String              @id @default(cuid())
+  supplierName String              @map("supplier_name")
+  purchaseDate DateTime            @map("purchase_date")
+  totalCost    Decimal             @db.Decimal(14, 2) @map("total_cost")
+  note         String?
+  createdById  String              @map("created_by")
+  createdBy    User                @relation(fields: [createdById], references: [id])
+  items        PurchaseOrderItem[]
+  createdAt    DateTime            @default(now()) @map("created_at")
+
+  @@index([purchaseDate])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(cuid())
+  purchaseOrderId String        @map("purchase_order_id")
+  rawMaterialId   String        @map("raw_material_id")
+  quantity        Decimal       @db.Decimal(14, 6)
+  unitPrice       Decimal       @db.Decimal(14, 4) @map("unit_price")
+  totalPrice      Decimal       @db.Decimal(14, 2) @map("total_price")
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  rawMaterial     RawMaterial   @relation(fields: [rawMaterialId], references: [id])
+
+  @@index([purchaseOrderId])
+  @@index([rawMaterialId])
+  @@map("purchase_order_items")
+}
+
+model FinishedProduct {
+  id              String             @id @default(cuid())
+  code            String             @unique
+  name            String
+  sizeDescription String?            @map("size_description")
+  retailPrice     Decimal            @db.Decimal(12, 2) @map("retail_price")
+  shelfLifeDays   Int                @map("shelf_life_days")
+  isActive        Boolean            @default(true) @map("is_active")
+  recipes         Recipe[]
+  productionBatches ProductionBatch[]
+  finishedGoodsAdjustments FinishedGoodsAdjustment[]
+  fridgeInventory    FridgeInventory[]
+  restockItems       RestockVisitItem[]
+  refillRequestItems RefillRequestItem[]
+  stockLots FridgeStockLot[]
+
+  @@map("finished_products")
+}
+
+model RawMaterialAdjustment {
+  id            String      @id @default(cuid())
+  rawMaterialId String      @map("raw_material_id")
+  quantityDelta Decimal     @db.Decimal(14, 6) @map("quantity_delta")
+  reason        String
+  note          String?
+  createdAt     DateTime    @default(now()) @map("created_at")
+  rawMaterial   RawMaterial @relation(fields: [rawMaterialId], references: [id])
+
+  @@index([rawMaterialId, createdAt])
+  @@map("raw_material_adjustments")
+}
+
+model Recipe {
+  id                String            @id @default(cuid())
+  finishedProductId String            @map("finished_product_id")
+  name              String
+  version           Int               @default(1)
+  baseCups          Int               @default(100) @map("base_cups")
+  isDefault         Boolean           @default(false) @map("is_default")
+  finishedProduct   FinishedProduct   @relation(fields: [finishedProductId], references: [id])
+  items             RecipeItem[]
+  productionBatches ProductionBatch[]
+
+  @@unique([finishedProductId, version])
+  @@index([finishedProductId, isDefault])
+  @@map("recipes")
+}
+
+model RecipeItem {
+  id               String      @id @default(cuid())
+  recipeId         String      @map("recipe_id")
+  rawMaterialId    String      @map("raw_material_id")
+  quantityRequired Decimal     @db.Decimal(14, 4) @map("quantity_required")
+  recipe           Recipe      @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  rawMaterial      RawMaterial @relation(fields: [rawMaterialId], references: [id])
+
+  @@unique([recipeId, rawMaterialId])
+  @@map("recipe_items")
+}
+
+model ProductionBatch {
+  id                String                @id @default(cuid())
+  batchNumber       String                @unique @map("batch_number")
+  recipeId          String                @map("recipe_id")
+  finishedProductId String                @map("finished_product_id")
+  quantityProduced  Int                   @map("quantity_produced")
+  quantityRemaining Int                   @map("quantity_remaining")
+  totalMaterialCost Decimal               @default(0) @db.Decimal(14, 2) @map("total_material_cost")
+  unitCost          Decimal               @default(0) @db.Decimal(14, 4) @map("unit_cost")
+  costKnown         Boolean               @default(false) @map("cost_known")
+  stockLots         FridgeStockLot[]
+  mfgDate           DateTime              @map("mfg_date")
+  expDate           DateTime              @map("exp_date")
+  status            ProductionBatchStatus @default(completed)
+  createdAt         DateTime              @default(now()) @map("created_at")
+  recipe            Recipe                @relation(fields: [recipeId], references: [id])
+  finishedProduct   FinishedProduct       @relation(fields: [finishedProductId], references: [id])
+  finishedGoodsAdjustments FinishedGoodsAdjustment[]
+
+  @@index([expDate])
+  @@index([status, expDate, mfgDate])
+  @@map("production_batches")
+}
+
+model Store {
+  id                 String            @id @default(cuid())
+  name               String
+  contactName        String?           @map("contact_name")
+  phone              String?
+  whatsapp           String?
+  facebook           String?
+  address            String?
+  latitude           Decimal?          @db.Decimal(10, 7)
+  longitude          Decimal?          @db.Decimal(10, 7)
+  fridgeStartDate    DateTime?         @map("fridge_start_date")
+  commissionRate     Decimal           @default(0.30) @db.Decimal(5, 4) @map("commission_rate")
+  monthlyElectricity Decimal           @default(200000) @db.Decimal(14, 2) @map("monthly_electricity")
+  isActive           Boolean           @default(true) @map("is_active")
+  createdAt          DateTime          @default(now()) @map("created_at")
+  fridge             Fridge?
+  fridgeInventory    FridgeInventory[]
+  restockVisits      RestockVisit[]
+  settlements        Settlement[]
+  refillRequests     RefillRequest[]
+  expenses           Expense[]
+  auditLogs          AuditLog[]
+  stockLots          FridgeStockLot[]
+
+  @@index([isActive, name])
+  @@map("stores")
+}
+
+model Fridge {
+  id             String            @id @default(cuid())
+  assetCode      String            @unique @map("asset_code")
+  model          String?
+  serialNo       String?           @unique @map("serial_no")
+  capacityCups   Int               @default(100) @map("capacity_cups")
+  currentStoreId String?           @unique @map("current_store_id")
+  status         FridgeStatus      @default(active)
+  currentStore   Store?            @relation(fields: [currentStoreId], references: [id])
+  inventory      FridgeInventory[]
+  restockVisits  RestockVisit[]
+  stockLots      FridgeStockLot[]
+
+  @@index([currentStoreId])
+  @@map("fridges")
+}
+
+model FridgeInventory {
+  id                String          @id @default(cuid())
+  storeId           String          @map("store_id")
+  fridgeId          String          @map("fridge_id")
+  finishedProductId String          @map("finished_product_id")
+  currentStock      Int             @default(0) @map("current_stock")
+  lastAuditDate     DateTime?       @map("last_audit_date")
+  store             Store           @relation(fields: [storeId], references: [id])
+  fridge            Fridge          @relation(fields: [fridgeId], references: [id])
+  finishedProduct   FinishedProduct @relation(fields: [finishedProductId], references: [id])
+
+  @@unique([fridgeId, finishedProductId])
+  @@index([storeId])
+  @@map("fridge_inventory")
+}
+
+model RestockVisit {
+  id           String               @id @default(cuid())
+  storeId      String               @map("store_id")
+  fridgeId     String               @map("fridge_id")
+  visitDate    DateTime             @map("visit_date")
+  driverUserId String?              @map("driver_user_id")
+  status       RestockVisitStatus   @default(draft)
+  note         String?
+  createdAt    DateTime             @default(now()) @map("created_at")
+  store        Store                @relation(fields: [storeId], references: [id])
+  fridge       Fridge               @relation(fields: [fridgeId], references: [id])
+  driver       User?                @relation(fields: [driverUserId], references: [id])
+  items        RestockVisitItem[]
+  settlement   Settlement?
+
+  @@index([storeId, visitDate])
+  @@index([driverUserId, visitDate])
+  @@map("restock_visits")
+}
+
+model RestockVisitItem {
+  id                   String          @id @default(cuid())
+  restockVisitId       String          @map("restock_visit_id")
+  finishedProductId    String          @map("finished_product_id")
+  previousStock        Int             @map("previous_stock")
+  countRemaining       Int             @map("count_remaining")
+  countExpiredReturned Int             @default(0) @map("count_expired_returned")
+  countRefilled        Int             @default(0) @map("count_refilled")
+  unitsSold            Int             @map("units_sold")
+  retailPrice          Decimal         @db.Decimal(12, 2) @map("retail_price")
+  subtotalGross        Decimal         @db.Decimal(14, 2) @map("subtotal_gross")
+  unitCost             Decimal         @default(0) @db.Decimal(14, 4) @map("unit_cost")
+  subtotalCost         Decimal         @default(0) @db.Decimal(14, 2) @map("subtotal_cost")
+  costKnown            Boolean?        @map("cost_known")
+  unknownCostUnits     Int?            @map("unknown_cost_units")
+  restockVisit         RestockVisit    @relation(fields: [restockVisitId], references: [id], onDelete: Cascade)
+  finishedProduct      FinishedProduct @relation(fields: [finishedProductId], references: [id])
+
+  @@unique([restockVisitId, finishedProductId])
+  @@map("restock_visit_items")
+}
+
+model Settlement {
+  id                    String        @id @default(cuid())
+  restockVisitId        String        @unique @map("restock_visit_id")
+  storeId               String        @map("store_id")
+  grossAmount           Decimal       @db.Decimal(14, 2) @map("gross_amount")
+  storeCommissionAmount Decimal       @db.Decimal(14, 2) @map("store_commission_amount")
+  netPayableAmount      Decimal       @db.Decimal(14, 2) @map("net_payable_amount")
+  paymentStatus         PaymentStatus  @default(pending) @map("payment_status")
+  paymentMethod         PaymentMethod? @map("payment_method")
+  previousBalance       Decimal        @default(0) @db.Decimal(14, 2) @map("previous_balance")
+  paidAmount            Decimal        @default(0) @db.Decimal(14, 2) @map("paid_amount")
+  closingBalance        Decimal        @default(0) @db.Decimal(14, 2) @map("closing_balance")
+  receiptNumber         String?        @unique @map("receipt_number")
+  slipImageUrl          String?        @map("slip_image_url")
+  settlementDate        DateTime      @default(now()) @map("settlement_date")
+  restockVisit          RestockVisit  @relation(fields: [restockVisitId], references: [id])
+  store                 Store         @relation(fields: [storeId], references: [id])
+
+  @@index([storeId, paymentStatus])
+  @@index([storeId, settlementDate])
+  @@index([settlementDate])
+  @@map("settlements")
+}
+
+model RefillRequest {
+  id          String              @id @default(cuid())
+  storeId     String              @map("store_id")
+  status      RefillRequestStatus @default(waiting)
+  requestedAt DateTime            @default(now()) @map("requested_at")
+  deliveredAt DateTime?           @map("delivered_at")
+  note        String?
+  createdAt   DateTime            @default(now()) @map("created_at")
+  store       Store               @relation(fields: [storeId], references: [id])
+  items       RefillRequestItem[]
+  stockLots   FridgeStockLot[]
+
+  @@index([storeId, status])
+  @@index([status, requestedAt])
+  @@index([requestedAt])
+  @@map("refill_requests")
+}
+
+model RefillRequestItem {
+  id                String          @id @default(cuid())
+  refillRequestId   String          @map("refill_request_id")
+  finishedProductId String          @map("finished_product_id")
+  quantity          Int
+  refillRequest     RefillRequest   @relation(fields: [refillRequestId], references: [id], onDelete: Cascade)
+  finishedProduct   FinishedProduct @relation(fields: [finishedProductId], references: [id])
+
+  @@unique([refillRequestId, finishedProductId])
+  @@map("refill_request_items")
+}
+
+model ExpenseCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("expense_categories")
+}
+
+model Expense {
+  id         String    @id @default(cuid())
+  storeId    String?   @map("store_id")
+  category   String
+  amount     Decimal   @db.Decimal(14, 2)
+  incurredAt DateTime  @map("incurred_at")
+  note       String?
+  voidedAt   DateTime? @map("voided_at")
+  voidReason String?   @map("void_reason")
+  receiptUrl String?   @map("receipt_url")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  store      Store?    @relation(fields: [storeId], references: [id])
+
+  @@index([incurredAt])
+  @@index([storeId, incurredAt])
+  @@map("expenses")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?  @map("user_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  storeId    String?  @map("store_id")
+  summary    String
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+  user       User?    @relation(fields: [userId], references: [id])
+  store      Store?   @relation(fields: [storeId], references: [id])
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([storeId, createdAt])
+  @@map("audit_logs")
+}
+
+model FinishedGoodsAdjustment {
+  id                String          @id @default(cuid())
+  productionBatchId String          @map("production_batch_id")
+  finishedProductId String          @map("finished_product_id")
+  quantity          Int
+  reason            String
+  note              String?
+  createdById       String?         @map("created_by")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  productionBatch   ProductionBatch @relation(fields: [productionBatchId], references: [id])
+  finishedProduct   FinishedProduct @relation(fields: [finishedProductId], references: [id])
+  createdBy         User?           @relation(fields: [createdById], references: [id])
+  @@index([productionBatchId, createdAt])
+  @@map("finished_goods_adjustments")
+}
+
+model DailyClosing {
+  id          String   @id @default(cuid())
+  closingDate DateTime @unique @map("closing_date")
+  cashAmount  Decimal  @default(0) @db.Decimal(14, 2) @map("cash_amount")
+  bankAmount  Decimal  @default(0) @db.Decimal(14, 2) @map("bank_amount")
+  expenseAmount Decimal @default(0) @db.Decimal(14, 2) @map("expense_amount")
+  note        String?
+  createdById String   @map("created_by")
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now()) @map("created_at")
+  @@index([closingDate])
+  @@map("daily_closings")
+}
+
+
+model OperationReceipt {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  scope       String
+  key         String
+  requestHash String   @map("request_hash")
+  result      Json
+  createdAt   DateTime @default(now()) @map("created_at")
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, scope, key])
+  @@index([createdAt])
+  @@map("operation_receipts")
+}
+
+model FridgeStockLot {
+  id                String          @id @default(cuid())
+  storeId           String          @map("store_id")
+  fridgeId          String          @map("fridge_id")
+  finishedProductId String          @map("finished_product_id")
+  productionBatchId String?         @map("production_batch_id")
+  refillRequestId   String?         @map("refill_request_id")
+  quantityReceived  Int             @map("quantity_received")
+  quantityRemaining Int             @map("quantity_remaining")
+  unitCost          Decimal         @db.Decimal(14,4) @map("unit_cost")
+  costKnown         Boolean         @default(false) @map("cost_known")
+  isLegacy          Boolean         @default(false) @map("is_legacy")
+  expDate           DateTime?       @map("exp_date")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  store             Store           @relation(fields: [storeId], references: [id])
+  fridge            Fridge          @relation(fields: [fridgeId], references: [id])
+  finishedProduct   FinishedProduct @relation(fields: [finishedProductId], references: [id])
+  productionBatch   ProductionBatch? @relation(fields: [productionBatchId], references: [id])
+  refillRequest     RefillRequest?  @relation(fields: [refillRequestId], references: [id])
+
+  @@index([fridgeId, finishedProductId, quantityRemaining])
+  @@index([refillRequestId])
+  @@map("fridge_stock_lots")
+}

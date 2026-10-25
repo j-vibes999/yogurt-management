@@ -1,0 +1,128 @@
+/* Category colors connect each workspace with its overview and section headings.
+   Status colors remain independent of the category and always accompany labels. */
+.workspace-color-page {
+  --color-domain-bg: var(--info-soft);
+  --color-domain-ink: var(--info);
+  --color-domain-accent: var(--info);
+}
+.workspace-color-page.color-domain-stores,
+.workspace-color-page.color-domain-operations,
+.workspace-color-page .color-domain-stores,
+.workspace-color-page .color-domain-operations {
+  --color-domain-bg: var(--info-soft);
+  --color-domain-ink: var(--info);
+  --color-domain-accent: var(--info);
+}
+.workspace-color-page.color-domain-refills,
+.workspace-color-page .color-domain-refills {
+  --color-domain-bg: var(--primary-soft);
+  --color-domain-ink: var(--primary);
+  --color-domain-accent: var(--primary);
+}
+.workspace-color-page.color-domain-materials,
+.workspace-color-page .color-domain-materials {
+  --color-domain-bg: var(--ym-violet-soft);
+  --color-domain-ink: #75509e;
+  --color-domain-accent: #9472bf;
+}
+.workspace-color-page.color-domain-finance,
+.workspace-color-page .color-domain-finance {
+  --color-domain-bg: var(--accent-soft);
+  --color-domain-ink: var(--warning);
+  --color-domain-accent: var(--accent);
+}
+
+/* Page titles stay compact; the category appears in the title and eyebrow. */
+.workspace-color-page .color-page-header h1 { color: var(--color-domain-ink) !important; }
+.workspace-color-page .color-page-header .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px !important;
+  border-radius: 6px;
+  background: var(--color-domain-bg) !important;
+  color: var(--color-domain-ink) !important;
+}
+.workspace-color-page .color-section-heading {
+  padding-left: 9px;
+  border-left: 3px solid var(--color-domain-accent);
+  color: var(--color-domain-ink) !important;
+}
+.workspace-color-page .color-section-heading :is(h2, h3, strong) { color: var(--color-domain-ink); }
+
+/* Tinted headers group white data and form surfaces without recoloring inputs. */
+.workspace-color-page .color-panel-heading {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--color-domain-bg) !important;
+  color: var(--color-domain-ink) !important;
+}
+.workspace-color-page .color-panel-heading :is(h2, h3, .panel-kicker) { color: var(--color-domain-ink) !important; }
+.workspace-color-page .color-panel-heading :is(p, small) { color: var(--muted); }
+.workspace-color-page :is(.fridge-card-head-v4, .restock-payment-head-v7).color-panel-heading { padding: 10px 12px; }
+.workspace-color-page .color-panel-heading:is(.map-sidebar-head-v4, .fridge-modal-head-v6, .expense-edit-modal-head-v22) { border-radius: 11px 11px 0 0; }
+.workspace-color-page summary.color-panel-heading { border-radius: 9px 9px 0 0; }
+.workspace-color-page .color-panel { border-color: var(--line) !important; }
+.workspace-color-page .color-panel-heading .text-link { color: var(--color-domain-ink); }
+.workspace-color-page .warning-text { color: var(--warning) !important; }
+
+/* Table headings carry the page or nested panel category. Data rows stay white. */
+.app-shell .workspace-color-page table thead th {
+  background: var(--color-domain-bg) !important;
+  color: var(--color-domain-ink) !important;
+}
+
+/* Explicit metric modifiers describe the number, including its zero state. */
+.workspace-color-page .color-metric-domain {
+  --color-metric-bg: var(--color-domain-bg);
+  --color-metric-ink: var(--color-domain-ink);
+  --color-metric-accent: var(--color-domain-accent);
+}
+.workspace-color-page .color-metric-info { --color-metric-bg: var(--info-soft); --color-metric-ink: var(--info); --color-metric-accent: var(--info); }
+.workspace-color-page .color-metric-success { --color-metric-bg: var(--success-soft); --color-metric-ink: var(--success); --color-metric-accent: var(--success); }
+.workspace-color-page .color-metric-warning { --color-metric-bg: var(--warning-soft); --color-metric-ink: var(--warning); --color-metric-accent: var(--accent); }
+.workspace-color-page .color-metric-danger { --color-metric-bg: var(--danger-soft); --color-metric-ink: var(--danger); --color-metric-accent: var(--danger); }
+.workspace-color-page .color-metric-neutral { --color-metric-bg: var(--surface-soft); --color-metric-ink: var(--muted); --color-metric-accent: var(--line-strong); }
+.workspace-color-page [class*="color-metric-"],
+.app-shell .workspace-color-page [class*="color-metric-"] {
+  background: var(--color-metric-bg) !important;
+  border-color: var(--line) !important;
+  border-top: 3px solid var(--color-metric-accent) !important;
+}
+.app-shell .workspace-color-page .workflow-kpis > [class*="color-metric-"] { background: var(--color-metric-bg) !important; border-top-color: var(--color-metric-accent) !important; }
+.workspace-color-page [class*="color-metric-"] :is(.stat-label, .metric-label) { color: var(--color-metric-ink) !important; }
+.workspace-color-page [class*="color-metric-"] > :is(span, small) { color: var(--muted) !important; }
+.workspace-color-page [class*="color-metric-"] > strong { color: var(--text) !important; }
+.app-shell .workspace-color-page .report-kpi-card-v4[class*="color-metric-"] { background: var(--color-metric-bg) !important; border-color: var(--line) !important; border-top-color: var(--color-metric-accent) !important; }
+.app-shell .workspace-color-page .report-kpi-card-v4[class*="color-metric-"] strong,
+.app-shell .workspace-color-page .report-kpi-card-v4[class*="color-metric-"] > span { color: var(--color-metric-ink) !important; }
+.workspace-color-page .color-metric-neutral .notification-dot-v4 { background: var(--muted) !important; box-shadow: none !important; }
+.workspace-color-page .payment-after-v7[class*="color-metric-"] strong { color: var(--color-metric-ink) !important; }
+
+/* Refill lifecycle colors apply to a short heading, not the entire work card. */
+.workspace-color-page .refill-card-v4 { --refill-heading-bg: var(--surface-soft); --refill-heading-ink: var(--muted); }
+.workspace-color-page .refill-card-v4.waiting { --refill-heading-bg: var(--warning-soft); --refill-heading-ink: var(--warning); }
+.workspace-color-page .refill-card-v4.preparing { --refill-heading-bg: var(--info-soft); --refill-heading-ink: var(--info); }
+.workspace-color-page .refill-card-v4.delivering,
+.workspace-color-page .refill-card-v4.completed { --refill-heading-bg: var(--success-soft); --refill-heading-ink: var(--success); }
+.workspace-color-page .refill-card-v4 > .refill-card-head-v4 { padding: 10px 12px; background: var(--refill-heading-bg); border-radius: 8px; }
+.workspace-color-page .refill-status-v4.waiting { background: var(--warning-soft) !important; color: var(--warning) !important; }
+.workspace-color-page .refill-status-v4.preparing { background: var(--info-soft) !important; color: var(--info) !important; }
+.workspace-color-page .refill-status-v4.delivering,
+.workspace-color-page .refill-status-v4.completed { background: var(--success-soft) !important; color: var(--success) !important; }
+.workspace-color-page .refill-qty-grid-v4 > .total { background: var(--primary-soft) !important; }
+.workspace-color-page .refill-qty-grid-v4 > .total strong { color: var(--primary) !important; }
+
+/* Selected controls use category color. Primary actions retain their shared style. */
+.workspace-color-page .filter-chips-v1 button.is-active,
+.workspace-color-page .store-filter-row-v4 button.is-active,
+.workspace-color-page .section-tabs-v1 button.is-active {
+  background: var(--color-domain-bg) !important;
+  color: var(--color-domain-ink) !important;
+  border-color: var(--line-strong) !important;
+}
+.workspace-color-page :is(a, button, summary):focus-visible { outline: 2px solid var(--focus-ring) !important; outline-offset: 3px !important; }
+
+@media (max-width: 640px) {
+  .workspace-color-page .color-panel-heading { padding: 10px; }
+  .workspace-color-page .refill-card-v4 > .refill-card-head-v4 { padding: 10px; }
+}
