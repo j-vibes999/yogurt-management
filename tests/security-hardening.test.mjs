@@ -58,3 +58,11 @@ test("real-user Web Vitals stay local and exclude user identity",()=>{
   assert.ok(!reporter.includes("email"));
   assert.ok(!reporter.includes("userId"));
 });
+
+test("forms with a password field post, so a submit before JavaScript loads never puts the password in the URL",()=>{
+  const login=read("src/app/login/page.tsx");
+  assert.match(login,/<form className="sign-in-form" method="post"/);
+  const userForm=read("src/components/operations-forms.tsx").split("\n").find(line=>line.startsWith("export function UserForm"));
+  assert.ok(userForm&&/<form [^>]*method="post"[^>]*>.*type="password"/.test(userForm));
+  assert.match(read("src/components/master-data-management.tsx"),/<form className="form-grid" method="post"[^>]*>.*type="password"/);
+});

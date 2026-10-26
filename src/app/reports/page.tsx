@@ -4,13 +4,14 @@ import { formatMoney } from "@/lib/business";
 import { getReportsData } from "@/lib/db-data";
 import { ReportExportButton } from "@/components/report-export-button";
 import { ResponsiveDisclosure } from "@/components/responsive-disclosure";
-import { businessReportRange } from "@/lib/date-only";
+import { businessDateString, businessReportRange } from "@/lib/date-only";
 export const dynamic="force-dynamic"; export const revalidate=0;
 
 export default async function ReportsPage({searchParams}:{searchParams?:Promise<{period?:string}>}){
   noStore(); const params=await searchParams; const period=["today","7d","month"].includes(params?.period??"")?params!.period!:"month"; const range=businessReportRange(period); const data=await getReportsData(range);
   const dateFormat=new Intl.DateTimeFormat("lo-LA",{timeZone:"Asia/Vientiane",day:"numeric",month:"short",year:"numeric"});
   const rangeLabel=`${dateFormat.format(range.from)} – ${dateFormat.format(new Date(range.to.getTime()-1))}`;
+  const csvContext={from:businessDateString(range.from),to:businessDateString(new Date(range.to.getTime()-1)),timeZone:"Asia/Vientiane",source:data.source,costMode:data.costMode};
   const units=data.productSales.reduce((s,i)=>s+i.unitsSold,0);
   // Expired and damaged cups are a cost of the goods, so they come off the gross profit too.
   const grossProfit=data.monthGross-data.storeShare-data.productCost-data.wasteCost;
@@ -20,7 +21,7 @@ export default async function ReportsPage({searchParams}:{searchParams?:Promise<
   const totalCosts=data.storeShare+data.productCost+data.wasteCost+data.expenses;
 
   return <div className="page workspace-color-page color-domain-finance reports-simple-v21 workflow-page workflow-finance">
-    <div className="page-header color-page-header"><div><div className="eyebrow">ລາຍງານ</div><h1>ລາຍງານ & ກຳໄລ</h1><p>ເບິ່ງຕົວເລກສຳຄັນກ່ອນ; ລາຍລະອຽດຢູ່ດ້ານລຸ່ມ.</p></div><div className="page-actions"><ReportExportButton rows={data.storeRows} period={period} summary={{gross:data.monthGross,storeShare:data.storeShare,productCost:data.productCost,wasteCost:data.wasteCost,centralWasteCost:data.centralWasteCost,expenses:data.expenses,netProfit:data.netProfit,unallocatedExpenses:data.unallocatedExpenses,electricityBudget:data.electricityBudget}}/></div></div>
+    <div className="page-header color-page-header"><div><div className="eyebrow">ລາຍງານ</div><h1>ລາຍງານ & ກຳໄລ</h1><p>ເບິ່ງຕົວເລກສຳຄັນກ່ອນ; ລາຍລະອຽດຢູ່ດ້ານລຸ່ມ.</p></div><div className="page-actions"><ReportExportButton rows={data.storeRows} period={period} summary={{gross:data.monthGross,storeShare:data.storeShare,productCost:data.productCost,wasteCost:data.wasteCost,centralWasteCost:data.centralWasteCost,expenses:data.expenses,netProfit:data.netProfit,unallocatedExpenses:data.unallocatedExpenses,electricityBudget:data.electricityBudget}} context={csvContext}/></div></div>
     {data.source==="demo"&&<div className="notice">ຖານຂໍ້ມູນຍັງບໍ່ພ້ອມ. ລາຍງານນີ້ໃຊ້ຂໍ້ມູນຕົວຢ່າງ.</div>}
     {data.source==="database"&&data.costMode==="estimated"&&<div className="notice">ຕົ້ນທຶນບາງລາຍການໃຊ້ຕົວເລກປະຫວັດທີ່ບັນທຶກໄວ້. ສິນຄ້າທີ່ຍັງບໍ່ຮູ້ຕົ້ນທຶນໃຊ້ 28% ຂອງຍອດຂາຍເພື່ອປະເມີນ.</div>}
 

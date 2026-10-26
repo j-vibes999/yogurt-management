@@ -36,18 +36,18 @@
     "@tanstack/react-table": "^8.20.5",
     "lucide-react": "^1.48.0",
     "maplibre-gl": "^6.10.0",
-    "next": "^15.5.27",
+    "next": "^15.5.28",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-hook-form": "^7.88.0",
-    "zod": "^4.1.8"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
     "eslint": "^9.36.0",
-    "eslint-config-next": "^15.5.27",
+    "eslint-config-next": "^15.5.28",
     "prisma": "^6.16.2",
     "typescript": "^5.9.2"
   },

@@ -72,7 +72,8 @@ export default function LoginPage() {
           <h1 id="sign-in-title">ຍິນດີຕ້ອນຮັບ</h1>
           <p>ເຂົ້າລະບົບເພື່ອຈັດການທຸລະກິດຂອງທ່ານ</p>
         </div>
-        <form className="sign-in-form" onSubmit={submit} aria-busy={busy}>
+        {/* method="post": if the page is submitted before JavaScript loads, the password goes in the request body, never in the URL. */}
+        <form className="sign-in-form" method="post" onSubmit={submit} aria-busy={busy}>
           <div className="sign-in-field">
             <label htmlFor="sign-in-email">ອີເມວ</label>
             <div className="sign-in-input-row">
