@@ -12,14 +12,15 @@ export default async function ReportsPage({searchParams}:{searchParams?:Promise<
   const dateFormat=new Intl.DateTimeFormat("lo-LA",{timeZone:"Asia/Vientiane",day:"numeric",month:"short",year:"numeric"});
   const rangeLabel=`${dateFormat.format(range.from)} – ${dateFormat.format(new Date(range.to.getTime()-1))}`;
   const units=data.productSales.reduce((s,i)=>s+i.unitsSold,0);
-  const grossProfit=data.monthGross-data.storeShare-data.productCost;
+  // Expired and damaged cups are a cost of the goods, so they come off the gross profit too.
+  const grossProfit=data.monthGross-data.storeShare-data.productCost-data.wasteCost;
   const margin=data.monthGross>0?data.netProfit/data.monthGross*100:0;
   const foodCost=data.monthGross>0?data.productCost/data.monthGross*100:0;
   const ranked=[...data.storeRows].sort((a,b)=>b.gross-a.gross);
-  const totalCosts=data.storeShare+data.productCost+data.expenses;
+  const totalCosts=data.storeShare+data.productCost+data.wasteCost+data.expenses;
 
   return <div className="page workspace-color-page color-domain-finance reports-simple-v21 workflow-page workflow-finance">
-    <div className="page-header color-page-header"><div><div className="eyebrow">ລາຍງານ</div><h1>ລາຍງານ & ກຳໄລ</h1><p>ເບິ່ງຕົວເລກສຳຄັນກ່ອນ; ລາຍລະອຽດຢູ່ດ້ານລຸ່ມ.</p></div><div className="page-actions"><ReportExportButton rows={data.storeRows} period={period} summary={{gross:data.monthGross,storeShare:data.storeShare,productCost:data.productCost,expenses:data.expenses,netProfit:data.netProfit,unallocatedExpenses:data.unallocatedExpenses,electricityBudget:data.electricityBudget}}/></div></div>
+    <div className="page-header color-page-header"><div><div className="eyebrow">ລາຍງານ</div><h1>ລາຍງານ & ກຳໄລ</h1><p>ເບິ່ງຕົວເລກສຳຄັນກ່ອນ; ລາຍລະອຽດຢູ່ດ້ານລຸ່ມ.</p></div><div className="page-actions"><ReportExportButton rows={data.storeRows} period={period} summary={{gross:data.monthGross,storeShare:data.storeShare,productCost:data.productCost,wasteCost:data.wasteCost,centralWasteCost:data.centralWasteCost,expenses:data.expenses,netProfit:data.netProfit,unallocatedExpenses:data.unallocatedExpenses,electricityBudget:data.electricityBudget}}/></div></div>
     {data.source==="demo"&&<div className="notice">ຖານຂໍ້ມູນຍັງບໍ່ພ້ອມ. ລາຍງານນີ້ໃຊ້ຂໍ້ມູນຕົວຢ່າງ.</div>}
     {data.source==="database"&&data.costMode==="estimated"&&<div className="notice">ຕົ້ນທຶນບາງລາຍການໃຊ້ຕົວເລກປະຫວັດທີ່ບັນທຶກໄວ້. ສິນຄ້າທີ່ຍັງບໍ່ຮູ້ຕົ້ນທຶນໃຊ້ 28% ຂອງຍອດຂາຍເພື່ອປະເມີນ.</div>}
 
@@ -38,8 +39,9 @@ export default async function ReportsPage({searchParams}:{searchParams?:Promise<
       <section className="reports-detail-grid-v21">
         <article className="card panel-card color-panel">
           <div className="panel-head color-panel-heading"><div><span className="panel-kicker">ຮ້ານ</span><h2>ຍອດຂາຍຕາມຮ້ານ</h2></div></div>
-          <div className="report-simple-list-v21">{ranked.map(row=><div key={row.storeId}><span><strong>{row.storeName}</strong><small>ກຳໄລ {formatMoney(row.profit)} · ລາຍຈ່າຍຈິງ {formatMoney(row.expenseTotal)}</small></span><b>{formatMoney(row.gross)}</b></div>)}</div>
+          <div className="report-simple-list-v21">{ranked.map(row=><div key={row.storeId}><span><strong>{row.storeName}</strong><small>ກຳໄລ {formatMoney(row.profit)} · ລາຍຈ່າຍຈິງ {formatMoney(row.expenseTotal)}{row.wasteCost>0?` · ຂອງເສຍ ${formatMoney(row.wasteCost)}`:""}</small></span><b>{formatMoney(row.gross)}</b></div>)}</div>
           {data.unallocatedExpenses>0&&<p className="panel-description">ລາຍຈ່າຍສ່ວນກາງ {formatMoney(data.unallocatedExpenses)} ຫັກຈາກກຳໄລລວມ.</p>}
+          {data.centralWasteCost>0&&<p className="panel-description">ສິນຄ້າທີ່ຕັດອອກຈາກສາງກາງ (ເສຍ / ໝົດອາຍຸ) {formatMoney(data.centralWasteCost)} ຫັກຈາກກຳໄລລວມ.</p>}
         </article>
         <article className="card panel-card color-panel">
           <div className="panel-head color-panel-heading"><div><span className="panel-kicker">ສິນຄ້າ</span><h2>ຍອດຂາຍຕາມສິນຄ້າ</h2></div><span className="store-meta">{units.toLocaleString()} ຖ້ວຍ</span></div>
@@ -48,7 +50,7 @@ export default async function ReportsPage({searchParams}:{searchParams?:Promise<
       </section>
       <article className="card panel-card color-panel report-cost-simple-v21">
         <div className="panel-head color-panel-heading"><div><span className="panel-kicker">ຕົ້ນທຶນ</span><h2>ຕົ້ນທຶນ & ລາຍຈ່າຍ</h2></div><span className="store-meta">ສັດສ່ວນຕົ້ນທຶນສິນຄ້າ {foodCost.toFixed(1)}%</span></div>
-        <div className="report-cost-stack-v4"><div><span>ສ່ວນແບ່ງຮ້ານ</span><strong>{formatMoney(data.storeShare)}</strong></div><div><span>ຕົ້ນທຶນສິນຄ້າ</span><strong>{formatMoney(data.productCost)}</strong></div><div><span>ລາຍຈ່າຍ</span><strong>{formatMoney(data.expenses)}</strong></div><div className="total"><span>ລວມ</span><strong>{formatMoney(totalCosts)}</strong></div></div>
+        <div className="report-cost-stack-v4"><div><span>ສ່ວນແບ່ງຮ້ານ</span><strong>{formatMoney(data.storeShare)}</strong></div><div><span>ຕົ້ນທຶນສິນຄ້າ</span><strong>{formatMoney(data.productCost)}</strong></div><div><span>ສິນຄ້າເສຍ / ໝົດອາຍຸ</span><strong>{formatMoney(data.wasteCost)}</strong></div><div><span>ລາຍຈ່າຍ</span><strong>{formatMoney(data.expenses)}</strong></div><div className="total"><span>ລວມ</span><strong>{formatMoney(totalCosts)}</strong></div></div>
       </article>
     </ResponsiveDisclosure>
   </div>;

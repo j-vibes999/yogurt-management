@@ -148,6 +148,7 @@ export type ReportStoreRow = {
   expenseTotal: number;
   electricityBudget: number;
   productCost: number;
+  wasteCost: number;
   profit: number;
 };
 
@@ -193,6 +194,11 @@ export type ReportsData = {
   storeShare: number;
   expenses: number;
   productCost: number;
+  /** Expired or damaged cups returned from fridges, plus write-offs at the central stock. */
+  wasteCost: number;
+  storeWasteCost: number;
+  centralWasteCost: number;
+  wasteUnits: number;
   costMode: "actual" | "estimated";
   netProfit: number;
   unallocatedExpenses: number;
@@ -427,7 +433,8 @@ async function dbStores(): Promise<StoreView[]> {
       status: store.fridge.status,
     } : null,
     // currentStock is live: completed refills are already applied to fridge inventory.
-    stock: store.fridgeInventory.reduce((sum, item) => sum + item.currentStock, 0),
+    // A store's stock is the stock of the fridge that stands in it now, not rows a moved fridge left behind.
+    stock: store.fridgeInventory.filter((item) => item.fridgeId === store.fridge?.id).reduce((sum, item) => sum + item.currentStock, 0),
     due: !latest.get(store.id)?.visit_date || latest.get(store.id)!.visit_date! < cutoff,
   }));
 }
@@ -696,15 +703,16 @@ export async function getMapData() {
         contactName: true,
         phone: true,
         whatsapp: true,
-        fridge: { select: { assetCode: true, capacityCups: true, status: true } },
-        fridgeInventory: { select: { currentStock: true, finishedProduct: { select: { name: true } } } },
+        fridge: { select: { id: true, assetCode: true, capacityCups: true, status: true } },
+        fridgeInventory: { select: { fridgeId: true, currentStock: true, finishedProduct: { select: { name: true } } } },
       },
     }), latestStoreState()]);
 
     return {
       source: "database" as DataSource,
       stores: rows.map((store) => {
-        const stock = store.fridgeInventory.reduce((sum, item) => sum + item.currentStock, 0);
+        const inventory = store.fridgeInventory.filter((item) => item.fridgeId === store.fridge?.id);
+        const stock = inventory.reduce((sum, item) => sum + item.currentStock, 0);
         const capacity = store.fridge?.capacityCups ?? 100;
         const status = latest.get(store.id)?.refill_status;
         return {
@@ -725,7 +733,7 @@ export async function getMapData() {
           phone: store.phone ?? "—",
           whatsapp: store.whatsapp ?? "—",
           fridgeNumber: store.fridge?.assetCode ?? "—",
-          yogurt: store.fridgeInventory.map((item) => ({ name: item.finishedProduct.name, quantity: item.currentStock })),
+          yogurt: inventory.map((item) => ({ name: item.finishedProduct.name, quantity: item.currentStock })),
         };
       }),
     };
@@ -754,7 +762,8 @@ export async function getRestockStoreData(storeId: string): Promise<{ source: Da
       where: { id: storeId },
       include: {
         fridge: true,
-        fridgeInventory: { include: { finishedProduct: true } },
+        // Same rows the audit API counts: only the fridge that stands in this store now (F04).
+        fridgeInventory: { where: { fridge: { currentStoreId: storeId } }, include: { finishedProduct: true } },
         settlements: { orderBy: [{ settlementDate: "desc" }, { id: "desc" }], take: 1, select: { closingBalance: true } },
       },
     });
@@ -822,7 +831,7 @@ export async function getReportsData(range?: { from?: Date; to?: Date }): Promis
     const productCost = dashboard.settlements.reduce((sum, item) => sum + item.cogs, 0);
     const storeRows = buildStoreReportRows(dashboard.stores, dashboard.settlements, expenses);
     const productSalesMap=new Map<string,{productId:string;code:string;name:string;unitsSold:number}>(); for(const st of dashboard.settlements)for(const x of st.productSales){const prev=productSalesMap.get(x.productId);productSalesMap.set(x.productId,{...x,unitsSold:(prev?.unitsSold??0)+x.unitsSold})}
-    return { source: "demo", monthGross, storeShare, expenses: expenseTotal, productCost, costMode: "estimated", netProfit: monthGross - storeShare - productCost - expenseTotal, weeklyGross: dashboard.weeklyGross, unallocatedExpenses: expenses.filter(x=>!x.storeId).reduce((sum,x)=>sum+x.amount,0), electricityBudget: dashboard.stores.reduce((sum,x)=>sum+x.monthlyElectricity,0), cheeseSold, mangoSold, productSales:[...productSalesMap.values()], storeRows };
+    return { source: "demo", monthGross, storeShare, expenses: expenseTotal, productCost, wasteCost: 0, storeWasteCost: 0, centralWasteCost: 0, wasteUnits: 0, costMode: "estimated", netProfit: monthGross - storeShare - productCost - expenseTotal, weeklyGross: dashboard.weeklyGross, unallocatedExpenses: expenses.filter(x=>!x.storeId).reduce((sum,x)=>sum+x.amount,0), electricityBudget: dashboard.stores.reduce((sum,x)=>sum+x.monthlyElectricity,0), cheeseSold, mangoSold, productSales:[...productSalesMap.values()], storeRows };
   };
   if (!(await canUseDatabase())) return fallback();
   try {
@@ -831,11 +840,12 @@ export async function getReportsData(range?: { from?: Date; to?: Date }): Promis
     const nextMonth = range?.to ?? defaults.to;
     const weekStart = sevenDaysAgo();
     type StoreBase = { id:string; name:string; monthlyElectricity: unknown };
-    type StoreAgg = { store_id:string; gross:unknown; commission:unknown; product_cost:unknown; all_actual:boolean };
+    type StoreAgg = { store_id:string; gross:unknown; commission:unknown; product_cost:unknown; all_actual:boolean; waste_cost:unknown; waste_units:unknown; waste_actual:boolean };
+    type CentralWasteAgg = { cost:unknown; units:unknown; all_known:boolean };
     type ExpenseAgg = { store_id:string|null; total:unknown; transport:unknown; electricity:unknown };
     type ProductAgg = { product_id:string; code:string; name:string; units_sold:unknown };
     type WeeklyAgg = { gross:unknown };
-    const [stores, storeAggs, expenseAggs, productAggs, weeklyRows] = await Promise.all([
+    const [stores, storeAggs, expenseAggs, productAggs, weeklyRows, centralWasteRows] = await Promise.all([
       prisma.store.findMany({ orderBy:{name:"asc"}, select:{id:true,name:true,monthlyElectricity:true} }),
       prisma.$queryRaw<StoreAgg[]>`
         WITH per_settlement AS (
@@ -846,7 +856,11 @@ export async function getReportsData(range?: { from?: Date; to?: Date }): Promis
                    ELSE 0 END), 0)
                    + CASE WHEN COUNT(i.id) = 0 AND s.gross_amount > 0 THEN ROUND(s.gross_amount * 0.28, 2) ELSE 0 END AS cogs,
                  CASE WHEN COUNT(i.id) = 0 THEN s.gross_amount = 0
-                   ELSE BOOL_AND(i.units_sold <= 0 OR COALESCE(i.cost_known, false)) END AS all_actual
+                   ELSE BOOL_AND(i.units_sold <= 0 OR COALESCE(i.cost_known, false)) END AS all_actual,
+                 -- Returned (expired or damaged) cups keep their lot cost; unknown-cost cups use the same 28% estimate.
+                 COALESCE(SUM(i.expired_cost + CASE WHEN i.expired_unknown_units > 0 THEN ROUND(i.expired_unknown_units * i.retail_price * 0.28, 2) ELSE 0 END), 0) AS waste_cost,
+                 COALESCE(SUM(i.count_expired_returned), 0) AS waste_units,
+                 COALESCE(BOOL_AND(i.expired_unknown_units = 0), true) AS waste_actual
           FROM settlements s
           LEFT JOIN restock_visit_items i ON i.restock_visit_id = s.restock_visit_id
           WHERE s.settlement_date >= (${monthStart}::timestamptz AT TIME ZONE 'UTC') AND s.settlement_date < (${nextMonth}::timestamptz AT TIME ZONE 'UTC')
@@ -856,7 +870,10 @@ export async function getReportsData(range?: { from?: Date; to?: Date }): Promis
                COALESCE(SUM(gross_amount),0) AS gross,
                COALESCE(SUM(store_commission_amount),0) AS commission,
                COALESCE(SUM(cogs),0) AS product_cost,
-               BOOL_AND(all_actual) AS all_actual
+               BOOL_AND(all_actual) AS all_actual,
+               COALESCE(SUM(waste_cost),0) AS waste_cost,
+               COALESCE(SUM(waste_units),0) AS waste_units,
+               BOOL_AND(waste_actual) AS waste_actual
         FROM per_settlement
         GROUP BY store_id
       `,
@@ -883,6 +900,15 @@ export async function getReportsData(range?: { from?: Date; to?: Date }): Promis
         FROM settlements
         WHERE settlement_date >= (${weekStart}::timestamptz AT TIME ZONE 'UTC')
       `,
+      // Cups written off at the central stock keep their batch cost; unknown-cost batches use the 28% estimate.
+      prisma.$queryRaw<CentralWasteAgg[]>`
+        SELECT COALESCE(SUM(CASE WHEN a.cost_known THEN ROUND(a.quantity * a.unit_cost, 2) ELSE ROUND(a.quantity * p.retail_price * 0.28, 2) END),0) AS cost,
+               COALESCE(SUM(a.quantity),0) AS units,
+               COALESCE(BOOL_AND(a.cost_known), true) AS all_known
+        FROM finished_goods_adjustments a
+        JOIN finished_products p ON p.id = a.finished_product_id
+        WHERE a.created_at >= (${monthStart}::timestamptz AT TIME ZONE 'UTC') AND a.created_at < (${nextMonth}::timestamptz AT TIME ZONE 'UTC')
+      `,
     ]);
     const aggByStore = new Map(storeAggs.map((row)=>[row.store_id,row]));
     const expenseByStore = new Map(expenseAggs.filter((row)=>row.store_id).map((row)=>[row.store_id as string,row]));
@@ -891,19 +917,27 @@ export async function getReportsData(range?: { from?: Date; to?: Date }): Promis
     const productCost = moneyValue(storeAggs.reduce((sum,row)=>sum+n(row.product_cost),0));
     const expenseTotal = moneyValue(expenseAggs.reduce((sum,row)=>sum+n(row.total),0));
     const productSales = productAggs.map((row)=>({productId:row.product_id,code:row.code,name:row.name,unitsSold:n(row.units_sold)}));
+    const storeWasteCost = moneyValue(storeAggs.reduce((sum,row)=>sum+n(row.waste_cost),0));
+    const centralWasteCost = moneyValue(n(centralWasteRows[0]?.cost));
+    const wasteCost = moneyValue(storeWasteCost + centralWasteCost);
+    const wasteUnits = storeAggs.reduce((sum,row)=>sum+n(row.waste_units),0) + n(centralWasteRows[0]?.units);
     const storeRows: ReportStoreRow[] = stores.map((store: StoreBase) => {
-      const agg=aggByStore.get(store.id); const gross=n(agg?.gross); const storeShare=n(agg?.commission); const productCost=n(agg?.product_cost);
+      const agg=aggByStore.get(store.id); const gross=n(agg?.gross); const storeShare=n(agg?.commission); const productCost=n(agg?.product_cost); const wasteCost=n(agg?.waste_cost);
       const expense=expenseByStore.get(store.id); const expenseTotal=n(expense?.total); const transport=n(expense?.transport); const electricity=n(expense?.electricity);
-      return { storeId:store.id, storeName:store.name, gross, storeShare, electricity, transport, expenseTotal, otherExpenses:moneyValue(expenseTotal-electricity-transport), electricityBudget:n(store.monthlyElectricity), productCost, profit:moneyValue(gross-storeShare-expenseTotal-productCost) };
-    }).filter((row)=>row.gross>0 || row.expenseTotal>0 || row.productCost>0).sort((a,b)=>b.gross-a.gross);
+      return { storeId:store.id, storeName:store.name, gross, storeShare, electricity, transport, expenseTotal, otherExpenses:moneyValue(expenseTotal-electricity-transport), electricityBudget:n(store.monthlyElectricity), productCost, wasteCost, profit:moneyValue(gross-storeShare-expenseTotal-productCost-wasteCost) };
+    }).filter((row)=>row.gross>0 || row.expenseTotal>0 || row.productCost>0 || row.wasteCost>0).sort((a,b)=>b.gross-a.gross);
     return {
       source:"database",
       monthGross,
       storeShare,
       expenses:expenseTotal,
       productCost,
-      costMode: storeAggs.every((row)=>row.all_actual) ? "actual" : "estimated",
-      netProfit:moneyValue(monthGross-storeShare-productCost-expenseTotal),
+      wasteCost,
+      storeWasteCost,
+      centralWasteCost,
+      wasteUnits,
+      costMode: storeAggs.every((row)=>row.all_actual && row.waste_actual) && (centralWasteRows[0]?.all_known ?? true) ? "actual" : "estimated",
+      netProfit:moneyValue(monthGross-storeShare-productCost-wasteCost-expenseTotal),
       unallocatedExpenses: expenseAggs.filter(row=>!row.store_id).reduce((sum,row)=>sum+n(row.total),0),
       electricityBudget: stores.reduce((sum,store)=>sum+n(store.monthlyElectricity),0),
       weeklyGross:n(weeklyRows[0]?.gross),
@@ -928,7 +962,7 @@ function buildStoreReportRows(stores: StoreView[], settlements: SettlementView[]
     const electricity = storeExpenses.filter(item=>["electricity","ຄ່າໄຟ","ຄ່າໄຟຟ້າ"].includes(item.category)).reduce((sum,item)=>sum+item.amount,0);
     const expenseTotal = storeExpenses.reduce((sum,item)=>sum+item.amount,0);
     const productCost = rows.reduce((sum,item)=>sum+item.cogs,0);
-    return { storeId:store.id, storeName:store.name, gross, storeShare, electricity, transport, otherExpenses:moneyValue(expenseTotal-electricity-transport), expenseTotal, electricityBudget:store.monthlyElectricity, productCost, profit:moneyValue(gross-storeShare-expenseTotal-productCost) };
+    return { storeId:store.id, storeName:store.name, gross, storeShare, electricity, transport, otherExpenses:moneyValue(expenseTotal-electricity-transport), expenseTotal, electricityBudget:store.monthlyElectricity, productCost, wasteCost:0, profit:moneyValue(gross-storeShare-expenseTotal-productCost) };
   }).filter(row=>row.gross>0 || row.expenseTotal>0 || row.productCost>0).sort((a,b)=>b.gross-a.gross);
 }
 
