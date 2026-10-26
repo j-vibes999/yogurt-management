@@ -3,6 +3,7 @@ import { withSerializableTransaction } from "@/lib/transaction";
 import { writeAuditLog } from "@/lib/audit";
 import { ensureFridgeLots } from "@/lib/stock-cost";
 import { getCurrentSession } from "@/lib/server-session";
+import { prisma } from "@/lib/prisma";
 
 type RefillStatus = "waiting" | "preparing" | "delivering" | "completed" | "cancelled";
 
@@ -99,10 +100,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (code === "STORE_HAS_NO_FRIDGE") return NextResponse.json({ error: "ຮ້ານນີ້ຍັງບໍ່ມີຕູ້ແຊ່" }, { status: 409 });
     if (code === "STORE_INACTIVE") return NextResponse.json({ error: "ຮ້ານນີ້ຖືກປິດໃຊ້" }, { status: 409 });
     if (code === "FRIDGE_MAINTENANCE") return NextResponse.json({ error: "ຕູ້ແຊ່ຢູ່ໃນສະຖານະບຳລຸງ" }, { status: 409 });
-    if (code.startsWith("FRIDGE_CAPACITY:")) { const [, current, incoming, capacity] = code.split(":"); return NextResponse.json({ error: `Fridge capacity exceeded: ${current} + ${incoming} > ${capacity}` }, { status: 409 }); }
+    if (code.startsWith("FRIDGE_CAPACITY:")) { const [, current, incoming, capacity] = code.split(":"); return NextResponse.json({ error: `ຕູ້ແຊ່ບັນຈຸບໍ່ພໍ: ມີແລ້ວ ${current} ຖ້ວຍ + ເຕີມ ${incoming} ຖ້ວຍ ເກີນຄວາມຈຸ ${capacity} ຖ້ວຍ` }, { status: 409 }); }
     if (code.startsWith("INSUFFICIENT_STOCK:")) {
       const [, productId, available, required] = code.split(":");
-      return NextResponse.json({ error: `Central stock is insufficient for ${productId}: ${available} available, ${required} required` }, { status: 409 });
+      const product = await prisma.finishedProduct.findUnique({ where: { id: productId }, select: { name: true } }).catch(() => null);
+      return NextResponse.json({ error: `ສິນຄ້າໃນສາງບໍ່ພໍ: ${product?.name ?? productId} ມີ ${available} ຖ້ວຍ (ທີ່ຍັງບໍ່ໝົດອາຍຸ), ຕ້ອງການ ${required} ຖ້ວຍ` }, { status: 409 });
     }
     console.error("[refill-api] status update failed", error);
     return NextResponse.json({ error: "ບໍ່ສາມາດອັບເດດສະຖານະການເຕີມສິນຄ້າໄດ້" }, { status: 400 });

@@ -14,7 +14,7 @@ export default async function StoreHubPage({ params }: { params: Promise<{ id: s
     where: { id },
     include: {
       fridge: true,
-      fridgeInventory: { include: { finishedProduct: true }, orderBy: { finishedProduct: { name: "asc" } } },
+      fridgeInventory: { where: { fridge: { currentStoreId: id } }, include: { finishedProduct: true }, orderBy: { finishedProduct: { name: "asc" } } },
       refillRequests: { where: { status: { in: ["waiting", "preparing", "delivering"] } }, include: { items: { include: { finishedProduct: true } } }, orderBy: { requestedAt: "desc" }, take: 5 },
       settlements: { orderBy: { settlementDate: "desc" }, take: 8 },
       restockVisits: { where: { status: "completed" }, orderBy: { visitDate: "desc" }, take: 6 },

@@ -64,12 +64,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
       if (currentStoreId && currentStoreId !== fridge.currentStoreId) {
         // The fridge arrives empty, so deliveries to the new store count from now on.
-        await tx.fridgeInventory.updateMany({ where: { fridgeId: fridge.id }, data: { storeId: currentStoreId, lastAuditDate: new Date() } });
+        const movedAt = new Date();
+        await tx.fridgeInventory.updateMany({ where: { fridgeId: fridge.id }, data: { storeId: currentStoreId, lastAuditDate: movedAt } });
         // A moved fridge needs a (zero) row for every active product so the next audit can count it.
         const existing = new Set(fridge.inventory.map((row) => row.finishedProductId));
         const products = await tx.finishedProduct.findMany({ where: { isActive: true }, select: { id: true } });
         for (const product of products) {
-          if (!existing.has(product.id)) await tx.fridgeInventory.create({ data: { storeId: currentStoreId, fridgeId: fridge.id, finishedProductId: product.id, currentStock: 0 } });
+          if (!existing.has(product.id)) await tx.fridgeInventory.create({ data: { storeId: currentStoreId, fridgeId: fridge.id, finishedProductId: product.id, currentStock: 0, lastAuditDate: movedAt } });
         }
       }
       await writeAuditLog({

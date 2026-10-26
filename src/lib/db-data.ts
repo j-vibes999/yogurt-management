@@ -1036,24 +1036,46 @@ export async function getProductionData(options?: { historyPage?: number }): Pro
 }
 
 
-async function notificationExtras() {
-  if (!(await canUseDatabase())) return { source:"demo" as DataSource, expiringCount:0, expiring:[] as Array<{batchNumber:string;expDate:Date}>, maintenanceCount:0, maintenance:[] as Array<{assetCode:string;currentStore:{name:string}|null}> };
+type NotificationExtras = {
+  source: DataSource;
+  expiringCount: number; expiring: Array<{ batchNumber: string; expDate: Date }>;
+  expiredCount: number; expired: Array<{ batchNumber: string; quantityRemaining: number }>;
+  expiredInFridges: Array<{ storeId: string; storeName: string; quantity: number }>;
+  maintenanceCount: number; maintenance: Array<{ assetCode: string; currentStore: { name: string } | null }>;
+};
+const noNotificationExtras = (): NotificationExtras => ({ source: "demo", expiringCount: 0, expiring: [], expiredCount: 0, expired: [], expiredInFridges: [], maintenanceCount: 0, maintenance: [] });
+
+async function notificationExtras(): Promise<NotificationExtras> {
+  if (!(await canUseDatabase())) return noNotificationExtras();
   const now=new Date(); const until=new Date(now.getTime()+7*86400000);
   const where={status:"completed" as const,quantityRemaining:{gt:0},expDate:{gte:now,lte:until}};
-  const [expiringCount,expiring,maintenanceCount,maintenance]=await Promise.all([
+  // Same cut-off as refills: a batch past its expiry date can no longer be sent out, so what is left must be written off.
+  const expiredWhere={status:"completed" as const,quantityRemaining:{gt:0},expDate:{lt:now}};
+  const [expiringCount,expiring,expiredCount,expired,expiredLots,maintenanceCount,maintenance]=await Promise.all([
     prisma.productionBatch.count({where}),
     prisma.productionBatch.findMany({where,orderBy:[{expDate:"asc"},{id:"asc"}],take:4,select:{batchNumber:true,expDate:true}}),
+    prisma.productionBatch.count({where:expiredWhere}),
+    prisma.productionBatch.findMany({where:expiredWhere,orderBy:[{expDate:"asc"},{id:"asc"}],take:4,select:{batchNumber:true,quantityRemaining:true}}),
+    // Fridge lots are used first-expiry-first at each audit, so a past-date lot with cups left means expired cups are probably still on sale.
+    prisma.fridgeStockLot.findMany({where:{quantityRemaining:{gt:0},expDate:{lt:now},fridge:{currentStoreId:{not:null}}},take:500,select:{storeId:true,quantityRemaining:true,fridge:{select:{currentStoreId:true}},store:{select:{name:true,isActive:true}}}}),
     prisma.fridge.count({where:{status:"maintenance"}}),
     prisma.fridge.findMany({where:{status:"maintenance"},take:4,orderBy:{assetCode:"asc"},select:{assetCode:true,currentStore:{select:{name:true}}}}),
   ]);
-  return {source:"database" as DataSource,expiringCount,expiring,maintenanceCount,maintenance};
+  const byStore=new Map<string,{storeId:string;storeName:string;quantity:number}>();
+  for (const lot of expiredLots) {
+    if (lot.fridge.currentStoreId!==lot.storeId||!lot.store.isActive) continue;
+    const entry=byStore.get(lot.storeId)??{storeId:lot.storeId,storeName:lot.store.name,quantity:0};
+    entry.quantity+=lot.quantityRemaining; byStore.set(lot.storeId,entry);
+  }
+  const expiredInFridges=[...byStore.values()].sort((a,b)=>b.quantity-a.quantity||a.storeName.localeCompare(b.storeName));
+  return {source:"database",expiringCount,expiring,expiredCount,expired,expiredInFridges,maintenanceCount,maintenance};
 }
 
 /** Shown when no alert is left for the viewer. */
 export const ALL_CLEAR_ALERT: NotificationView = { id: "all-clear", type: "info", title: "ບໍ່ມີລາຍການດ່ວນ", detail: "ສິນຄ້າຄົງເຫຼືອ, ການເຕີມສິນຄ້າ, ຍອດຄ້າງ ແລະຕູ້ແຊ່ບໍ່ມີສັນຍານເຕືອນໃນຂະນະນີ້", href: "/" };
 
 export async function getNotificationsData(existingDashboard?: DashboardData | Promise<DashboardData>): Promise<{ source: DataSource; alerts: NotificationView[] }> {
-  const [dashboard, extras] = await Promise.all([existingDashboard ?? getDashboardData(), notificationExtras().catch(error=>{console.error("[yogurt-db] notification query failed",error);return {source:"demo" as DataSource,expiringCount:0,expiring:[],maintenanceCount:0,maintenance:[]};})]);
+  const [dashboard, extras] = await Promise.all([existingDashboard ?? getDashboardData(), notificationExtras().catch(error=>{console.error("[yogurt-db] notification query failed",error);return noNotificationExtras();})]);
   const alerts: NotificationView[] = [];
   const due = dashboard.stores.filter((store) => store.due);
   for (const store of due.slice(0, 4)) alerts.push({ id: `due-store-${store.id}`, type: "urgent", title: `${store.name} ຮອດຮອບກວດ`, detail: `${store.fridge?.assetCode ?? "ບໍ່ມີຕູ້"} · ຄົງເຫຼືອ ${store.stock} ຖ້ວຍ`, href: `/driver/restock/${store.id}` });
@@ -1062,6 +1084,9 @@ export async function getNotificationsData(existingDashboard?: DashboardData | P
   if (waiting.length) alerts.push({ id: "refills", type: "urgent", title: `${waiting.length} ຄຳຂໍເຕີມສິນຄ້າຕ້ອງຈັດການ`, detail: waiting.slice(0, 4).map((item) => item.storeName).join(" · "), href: "/refills" });
   for (const material of dashboard.lowMaterials.slice(0, 5)) alerts.push({ id: `material-${material.id}`, type: "warning", title: `${material.name} ໃກ້ຈຸດສັ່ງຊື້`, detail: `ຄົງເຫຼືອ ${material.stock} ${material.unit} · ຈຸດແຈ້ງເຕືອນ ${material.minStock} ${material.unit}`, href: "/inventory" });
   if (dashboard.outstanding > 0) alerts.push({ id: "receivables", type: "warning", title: `ຍອດຄ້າງຮັບ ${dashboard.outstanding.toLocaleString()} LAK`, detail: "ຄິດຈາກຍອດຄົງຄ້າງຫຼ້າສຸດຂອງແຕ່ລະຮ້ານ", href: "/settlements" });
+  const fridgeExpired = extras.expiredInFridges;
+  if (fridgeExpired.length) alerts.push({ id:"expired-in-fridges",type:"urgent",title:`ອາດມີສິນຄ້າໝົດອາຍຸຄ້າງໃນຕູ້ ${fridgeExpired.length} ຮ້ານ`,detail:`${fridgeExpired.slice(0,4).map(store=>`${store.storeName} · ${store.quantity} ຖ້ວຍ`).join(" · ")} · ກວດ ແລະເກັບຄືນໃນຮອບກວດ`,href:fridgeExpired.length===1?`/driver/restock/${fridgeExpired[0].storeId}`:"/driver" });
+  if (extras.expiredCount) alerts.push({ id:"expired-batches",type:"warning",title:`${extras.expiredCount} ລັອດຜະລິດໝົດອາຍຸແລ້ວ ແຕ່ຍັງມີຄົງເຫຼືອໃນສາງ`,detail:`${extras.expired.map(batch=>`${batch.batchNumber} · ເຫຼືອ ${batch.quantityRemaining} ຖ້ວຍ`).join(" · ")} · ບັນທຶກຕັດຖິ້ມເພື່ອໃຫ້ຍອດສາງ ແລະຕົ້ນທຶນຖືກຕ້ອງ`,href:"/production" });
   if (extras.expiringCount) alerts.push({ id:"expiring",type:"warning",title:`${extras.expiringCount} ລັອດຜະລິດໃກ້ໝົດອາຍຸ`,detail:extras.expiring.map(batch=>`${batch.batchNumber} · ${Math.ceil((batch.expDate.getTime()-Date.now())/86400000)} ມື້`).join(" · "),href:"/production" });
   if (extras.maintenanceCount) alerts.push({id:"maintenance",type:"info",title:`${extras.maintenanceCount} ຕູ້ຢູ່ສະຖານະບຳລຸງຮັກສາ`,detail:extras.maintenance.map(fridge=>`${fridge.assetCode} · ${fridge.currentStore?.name??"—"}`).join(" · "),href:"/fridges"});
   if (extras.source==="demo"&&dashboard.source==="database") alerts.push({id:"notification-unavailable",type:"warning",title:"ກວດກາສິນຄ້າໃກ້ໝົດອາຍຸບໍ່ສຳເລັດ",detail:"ກະລຸນາໂຫຼດໜ້າຄືນ",href:"/notifications"});
