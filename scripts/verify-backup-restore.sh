@@ -1,8 +1,11 @@
 #!/bin/sh
 set -eu
-ROOT="/Users/justkay/Projects/Yogurt_Super_Web"
-PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# Weekly (launchd com.yogurt.manager.backup-verify): restores the newest backup into a scratch database,
+# checks counts and invariants, checks the payment-slip archive next to it, then drops the scratch database.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PATH="/opt/homebrew/bin:/usr/local/bin:/opt/homebrew/opt/postgresql@16/bin:/usr/local/opt/postgresql@16/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH
+. "$ROOT/scripts/lib-env.sh"
 cd "$ROOT"
 fail(){ code="$1"; shift; msg="$*"; echo "$msg" >&2; "$ROOT/scripts/send-alert.sh" error backup.restore_verification_failed "$msg" >/dev/null 2>&1 || true; exit "$code"; }
 BACKUP=${1:-$(ls -1t "$ROOT"/.yogurt/backups/yogurt_ops-*.dump 2>/dev/null | head -1)}
@@ -12,8 +15,9 @@ CHECKSUM="$BACKUP.sha256"
 EXPECTED_HASH=$(awk 'NR==1 {print $1}' "$CHECKSUM")
 ACTUAL_HASH=$(shasum -a 256 "$BACKUP" | awk '{print $1}')
 [ -n "$EXPECTED_HASH" ] && [ "$EXPECTED_HASH" = "$ACTUAL_HASH" ] || fail 2 "Backup checksum mismatch: $BACKUP"
-DBURL=$(node -e "require('dotenv').config({path:'.env'}); const u=new URL(process.env.DATABASE_URL); u.search=''; process.stdout.write(u.toString())")
-ADMINURL=$(node -e "require('dotenv').config({path:'.env'}); const u=new URL(process.env.DATABASE_URL); u.search=''; u.pathname='/postgres'; process.stdout.write(u.toString())")
+DBURL=$(database_url)
+[ -n "$DBURL" ] || fail 2 "DATABASE_URL is not set in .env"
+ADMINURL=$(node -e "const u=new URL(process.argv[1]); u.pathname='/postgres'; process.stdout.write(u.toString())" "$DBURL")
 NAME="yogurt_restore_verify_$(date '+%Y%m%d%H%M%S')_$$"
 RESTOREURL=$(node -e "const u=new URL(process.argv[1]); u.pathname='/'+process.argv[2]; process.stdout.write(u.toString())" "$DBURL" "$NAME")
 cleanup(){ rc=$?; psql "$ADMINURL" -v ON_ERROR_STOP=0 -c "DROP DATABASE IF EXISTS \"$NAME\" WITH (FORCE);" >/dev/null 2>&1 || true; [ "$rc" -eq 0 ] || "$ROOT/scripts/send-alert.sh" error backup.restore_verification_failed "Restore verification failed (exit $rc)" >/dev/null 2>&1 || true; }
@@ -29,4 +33,12 @@ SETTLEMENT_INVALID=$(psql "$RESTOREURL" -Atc "SELECT count(*) FROM settlements W
 [ "$FRIDGE_NEG" = "0" ] || fail 3 "restored DB has negative fridge stock"
 [ "$BATCH_INVALID" = "0" ] || fail 3 "restored DB has invalid production batch quantities/costs"
 [ "$SETTLEMENT_INVALID" = "0" ] || fail 3 "restored DB has invalid settlement amounts"
-printf '{"ok":true,"backup":"%s","verifiedAt":"%s","counts":%s}\n' "$(basename "$BACKUP")" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$RESULT" | tee "$ROOT/.yogurt/backups/last-restore-verification.json"
+# The payment-slip archive made with this dump (if there were slips) must match its checksum.
+RECEIPTS="${BACKUP%.dump}.receipts.tar.gz"
+RECEIPT_FILES=0
+if [ -f "$RECEIPTS" ]; then
+  [ -f "$RECEIPTS.sha256" ] || fail 2 "Missing checksum: $RECEIPTS.sha256"
+  [ "$(awk 'NR==1 {print $1}' "$RECEIPTS.sha256")" = "$(shasum -a 256 "$RECEIPTS" | awk '{print $1}')" ] || fail 2 "Receipt archive checksum mismatch: $RECEIPTS"
+  RECEIPT_FILES=$(tar -tzf "$RECEIPTS" | grep -c '^private-receipts/.' || true)
+fi
+printf '{"ok":true,"backup":"%s","verifiedAt":"%s","counts":%s,"receiptFiles":%s}\n' "$(basename "$BACKUP")" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$RESULT" "$RECEIPT_FILES" | tee "$ROOT/.yogurt/backups/last-restore-verification.json"

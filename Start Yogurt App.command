@@ -1,9 +1,10 @@
 #!/bin/zsh
+# Development server on http://127.0.0.1:3005. Never 3000: the Cloudflare tunnel publishes port 3000.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="$ROOT/.yogurt-next.pid"
 LOG_FILE="$ROOT/.yogurt-next.log"
-PORT=3000
+PORT=3005
 cd "$ROOT"
 
 if [ -f "$PID_FILE" ]; then

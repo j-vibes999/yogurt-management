@@ -7,7 +7,7 @@ if lsof -nP -iTCP:3101 -sTCP:LISTEN >/dev/null 2>&1; then
   echo 'Test port 3101 is already in use; refusing to run against another server' >&2
   exit 2
 fi
-BASE_URL=$(node -e "require('dotenv').config({path:'.env'}); const u=new URL(process.env.DATABASE_URL); u.search=''; process.stdout.write(u.toString())")
+ROOT="${ROOT:-$PWD}"; . "$ROOT/scripts/lib-env.sh"; BASE_URL=$(database_url)
 TMP_DB="yogurt_e2e_$(date +%Y%m%d%H%M%S)_$$"
 TMP_URL=$(node -e "const u=new URL(process.argv[1]);u.pathname='/${TMP_DB}';process.stdout.write(u.toString())" "$BASE_URL")
 DUMP=$(mktemp /tmp/yogurt-e2e-XXXXXX.dump)
