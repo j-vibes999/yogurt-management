@@ -1,5 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache";
-import { getNotificationsData } from "@/lib/db-data";
+import { ALL_CLEAR_ALERT, getNotificationsData } from "@/lib/db-data";
+import { canRoleOpen } from "@/lib/access-policy";
+import { getViewerRole } from "@/lib/server-session";
 import { NotificationCenter } from "@/components/notification-center";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +9,10 @@ export const revalidate = 0;
 
 export default async function NotificationsPage() {
   noStore();
-  const { source, alerts } = await getNotificationsData();
+  const [{ source, alerts: allAlerts }, role] = await Promise.all([getNotificationsData(), getViewerRole()]);
+  // Only alerts this role can open; the rest would lead to a page that sends it back.
+  const visible = allAlerts.filter((alert) => alert.id !== ALL_CLEAR_ALERT.id && canRoleOpen(role, alert.href));
+  const alerts = visible.length ? visible : [ALL_CLEAR_ALERT];
   const urgent = alerts.filter((alert) => alert.type === "urgent").length;
   const warning = alerts.filter((alert) => alert.type === "warning").length;
   const info = alerts.filter((alert) => alert.type === "info").length;

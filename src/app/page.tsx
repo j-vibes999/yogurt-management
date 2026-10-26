@@ -9,6 +9,8 @@ import { DashboardStoreTasks } from "@/components/dashboard-store-tasks";
 import { formatMoney } from "@/lib/business";
 import { getDashboardData, getNotificationsData } from "@/lib/db-data";
 import { getDashboardAttentionSummary, type DashboardAttentionItem } from "@/lib/dashboard-summary";
+import { canRoleOpen } from "@/lib/access-policy";
+import { getViewerRole } from "@/lib/server-session";
 import "./dashboard.css";
 
 export const dynamic = "force-dynamic";
@@ -40,8 +42,10 @@ function DashboardMetric({ label, value, unit, note, href, icon: Icon, category 
 export default async function DashboardPage() {
   noStore();
   const dashboardPromise = getDashboardData();
-  const [data, notificationData] = await Promise.all([dashboardPromise, getNotificationsData(dashboardPromise)]);
-  const attention = getDashboardAttentionSummary(data, notificationData.alerts);
+  const [data, notificationData, role] = await Promise.all([dashboardPromise, getNotificationsData(dashboardPromise), getViewerRole()]);
+  // Show figures, alerts and links only for pages this role can open, so nothing leads to a dead end.
+  const can = (href: string) => canRoleOpen(role, href);
+  const attention = getDashboardAttentionSummary(data, notificationData.alerts).filter((item) => can(item.href));
   const dueStores = data.stores.filter((store) => store.due)
     .sort((a, b) => a.stock - b.stock || a.name.localeCompare(b.name, "lo"));
   const now = new Date();
@@ -67,10 +71,10 @@ export default async function DashboardPage() {
       </header>
 
       <section className="dashboard-metrics" aria-label="ຕົວເລກສຳຄັນ">
-        <DashboardMetric category="refills" label="ຄິວເຕີມສິນຄ້າ" value={data.refills.length} unit="ຄິວ" note={data.refills.length > 0 ? "ລໍຖ້າ / ຈັດສິນຄ້າ / ສົ່ງ" : "ບໍ່ມີຄິວທີ່ກຳລັງເຮັດ"} href="/refills" icon={RefreshCw} />
-        <DashboardMetric category="stores" label="ຮ້ານຮອດຮອບກວດ" value={data.dueStores} unit="ຮ້ານ" note="ກວດຕູ້ແຊ່ ແລະສິນຄ້າ" href="/driver" icon={Store} />
-        <DashboardMetric category="receivables" label="ຍອດຄ້າງຮັບ" value={data.outstanding} unit="LAK" note="ຍອດຄົງຄ້າງຈາກຮ້ານຄ້າ" href="/settlements" icon={CircleDollarSign} />
-        <DashboardMetric category="materials" label="ວັດຖຸດິບທີ່ຄວນຈັບຕາ" value={low} unit="ລາຍການ" note={low > 0 ? "ໃກ້ຈຸດສັ່ງຊື້ ຫຼືຕ່ຳກວ່າ" : "ບໍ່ມີລາຍການທີ່ຕ້ອງຈັບຕາ"} href="/inventory" icon={Boxes} />
+        {can("/refills") && <DashboardMetric category="refills" label="ຄິວເຕີມສິນຄ້າ" value={data.refills.length} unit="ຄິວ" note={data.refills.length > 0 ? "ລໍຖ້າ / ຈັດສິນຄ້າ / ສົ່ງ" : "ບໍ່ມີຄິວທີ່ກຳລັງເຮັດ"} href="/refills" icon={RefreshCw} />}
+        {can("/driver") && <DashboardMetric category="stores" label="ຮ້ານຮອດຮອບກວດ" value={data.dueStores} unit="ຮ້ານ" note="ກວດຕູ້ແຊ່ ແລະສິນຄ້າ" href="/driver" icon={Store} />}
+        {can("/settlements") && <DashboardMetric category="receivables" label="ຍອດຄ້າງຮັບ" value={data.outstanding} unit="LAK" note="ຍອດຄົງຄ້າງຈາກຮ້ານຄ້າ" href="/settlements" icon={CircleDollarSign} />}
+        {can("/inventory") && <DashboardMetric category="materials" label="ວັດຖຸດິບທີ່ຄວນຈັບຕາ" value={low} unit="ລາຍການ" note={low > 0 ? "ໃກ້ຈຸດສັ່ງຊື້ ຫຼືຕ່ຳກວ່າ" : "ບໍ່ມີລາຍການທີ່ຕ້ອງຈັບຕາ"} href="/inventory" icon={Boxes} />}
       </section>
 
       <dl className="dashboard-secondary-metrics">
@@ -103,9 +107,9 @@ export default async function DashboardPage() {
         <section className="dashboard-work-panel dashboard-category-stores" aria-labelledby="dashboard-stores-title">
           <div className="dashboard-panel-heading">
             <div className="dashboard-panel-title"><span className="dashboard-category-icon"><Store size={18} aria-hidden="true" /></span><div><h2 id="dashboard-stores-title">ຮ້ານທີ່ຕ້ອງກວດ <span>{number(dueStores.length)}</span></h2><p>ຮ້ານທີ່ສິນຄ້າເຫຼືອນ້ອຍຢູ່ເທິງສຸດ</p></div></div>
-            <Link prefetch={false} href="/driver" className="dashboard-text-link">ກວດຮ້ານ<ArrowRight size={14} aria-hidden="true" /></Link>
+            {can("/driver") && <Link prefetch={false} href="/driver" className="dashboard-text-link">ກວດຮ້ານ<ArrowRight size={14} aria-hidden="true" /></Link>}
           </div>
-          <DashboardStoreTasks stores={dueStores.map(({ id, name, address, stock, fridge }) => ({ id, name, address, stock, fridge }))} />
+          <DashboardStoreTasks allowRestock={can("/driver")} stores={dueStores.map(({ id, name, address, stock, fridge }) => ({ id, name, address, stock, fridge }))} />
         </section>
 
         <div className="dashboard-side-panels">
@@ -140,7 +144,7 @@ export default async function DashboardPage() {
             {data.refills.length > 5 && <div className="dashboard-list-more"><span>ຍັງມີອີກ {number(data.refills.length - 5)} ຄິວ</span><Link prefetch={false} href="/refills" className="dashboard-text-link">ເບິ່ງທັງໝົດ<ArrowRight size={14} aria-hidden="true" /></Link></div>}
           </section>
 
-          <section className="dashboard-work-panel dashboard-category-materials" aria-labelledby="dashboard-materials-title">
+          {can("/inventory") && <section className="dashboard-work-panel dashboard-category-materials" aria-labelledby="dashboard-materials-title">
             <div className="dashboard-panel-heading">
               <div className="dashboard-panel-title"><span className="dashboard-category-icon"><Boxes size={18} aria-hidden="true" /></span><div><h2 id="dashboard-materials-title">ວັດຖຸດິບທີ່ຄວນຈັບຕາ <span>{number(low)}</span></h2></div></div>
               <Link prefetch={false} href="/inventory" className="dashboard-text-link">ເບິ່ງສາງ<ArrowRight size={14} aria-hidden="true" /></Link>
@@ -157,7 +161,7 @@ export default async function DashboardPage() {
               </ul>
             ) : <div className="dashboard-inline-empty"><CheckCircle2 size={18} aria-hidden="true" /><span>ບໍ່ມີວັດຖຸດິບໃກ້ຈຸດສັ່ງຊື້</span></div>}
             {low > 5 && <div className="dashboard-list-more"><span>ຍັງມີອີກ {number(low - 5)} ລາຍການ</span><Link prefetch={false} href="/inventory" className="dashboard-text-link">ເບິ່ງທັງໝົດ<ArrowRight size={14} aria-hidden="true" /></Link></div>}
-          </section>
+          </section>}
         </div>
       </div>
     </div>

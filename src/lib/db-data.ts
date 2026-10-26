@@ -1049,6 +1049,9 @@ async function notificationExtras() {
   return {source:"database" as DataSource,expiringCount,expiring,maintenanceCount,maintenance};
 }
 
+/** Shown when no alert is left for the viewer. */
+export const ALL_CLEAR_ALERT: NotificationView = { id: "all-clear", type: "info", title: "ບໍ່ມີລາຍການດ່ວນ", detail: "ສິນຄ້າຄົງເຫຼືອ, ການເຕີມສິນຄ້າ, ຍອດຄ້າງ ແລະຕູ້ແຊ່ບໍ່ມີສັນຍານເຕືອນໃນຂະນະນີ້", href: "/" };
+
 export async function getNotificationsData(existingDashboard?: DashboardData | Promise<DashboardData>): Promise<{ source: DataSource; alerts: NotificationView[] }> {
   const [dashboard, extras] = await Promise.all([existingDashboard ?? getDashboardData(), notificationExtras().catch(error=>{console.error("[yogurt-db] notification query failed",error);return {source:"demo" as DataSource,expiringCount:0,expiring:[],maintenanceCount:0,maintenance:[]};})]);
   const alerts: NotificationView[] = [];
@@ -1062,6 +1065,6 @@ export async function getNotificationsData(existingDashboard?: DashboardData | P
   if (extras.expiringCount) alerts.push({ id:"expiring",type:"warning",title:`${extras.expiringCount} ລັອດຜະລິດໃກ້ໝົດອາຍຸ`,detail:extras.expiring.map(batch=>`${batch.batchNumber} · ${Math.ceil((batch.expDate.getTime()-Date.now())/86400000)} ມື້`).join(" · "),href:"/production" });
   if (extras.maintenanceCount) alerts.push({id:"maintenance",type:"info",title:`${extras.maintenanceCount} ຕູ້ຢູ່ສະຖານະບຳລຸງຮັກສາ`,detail:extras.maintenance.map(fridge=>`${fridge.assetCode} · ${fridge.currentStore?.name??"—"}`).join(" · "),href:"/fridges"});
   if (extras.source==="demo"&&dashboard.source==="database") alerts.push({id:"notification-unavailable",type:"warning",title:"ກວດກາສິນຄ້າໃກ້ໝົດອາຍຸບໍ່ສຳເລັດ",detail:"ກະລຸນາໂຫຼດໜ້າຄືນ",href:"/notifications"});
-  if (!alerts.length) alerts.push({ id: "all-clear", type: "info", title: "ບໍ່ມີລາຍການດ່ວນ", detail: "ສິນຄ້າຄົງເຫຼືອ, ການເຕີມສິນຄ້າ, ຍອດຄ້າງ ແລະຕູ້ແຊ່ບໍ່ມີສັນຍານເຕືອນໃນຂະນະນີ້", href: "/" });
+  if (!alerts.length) alerts.push(ALL_CLEAR_ALERT);
   return { source: dashboard.source, alerts };
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentSession } from "@/lib/server-session";
+import { canRoleOpen } from "@/lib/access-policy";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -51,12 +52,14 @@ export async function GET() {
   const outstanding = Number(row?.outstanding_total ?? 0);
   const expiring = Number(row?.expiring_count ?? 0);
   const maintenance = Number(row?.maintenance_count ?? 0);
-  const dueAlerts = Math.min(driver, 4) + (driver > 4 ? 1 : 0);
-  const alertCount = dueAlerts + (refill > 0 ? 1 : 0) + Math.min(warningMaterials, 5) + (outstanding > 0 ? 1 : 0) + (expiring > 0 ? 1 : 0) + (maintenance > 0 ? 1 : 0);
+  // Count only the alerts and badges this role can open (same rule as the dashboard and notifications).
+  const can = (href: string) => canRoleOpen(session.role, href);
+  const dueAlerts = can("/driver") ? Math.min(driver, 4) + (driver > 4 ? 1 : 0) : 0;
+  const alertCount = dueAlerts + (refill > 0 && can("/refills") ? 1 : 0) + (can("/inventory") ? Math.min(warningMaterials, 5) : 0) + (outstanding > 0 && can("/settlements") ? 1 : 0) + (expiring > 0 && can("/production") ? 1 : 0) + (maintenance > 0 && can("/fridges") ? 1 : 0);
 
   return NextResponse.json({
     session: { userId: session.userId, fullName: session.fullName, email: session.email, role: session.role },
     alertCount,
-    navCounts: { refill, inventory, settlements, driver },
+    navCounts: { refill: can("/refills") ? refill : 0, inventory: can("/inventory") ? inventory : 0, settlements: can("/settlements") ? settlements : 0, driver: can("/driver") ? driver : 0 },
   });
 }

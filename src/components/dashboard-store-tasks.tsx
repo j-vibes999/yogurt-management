@@ -40,8 +40,8 @@ function StoreTaskStatus({ store }: { store: DashboardStore }) {
   return <span className={`dashboard-row-status ${status.className}`}>{status.label}</span>;
 }
 
-function StoreTaskAction({ store }: { store: DashboardStore }) {
-  const canRestock = store.fridge?.status === "active";
+function StoreTaskAction({ store, allowRestock }: { store: DashboardStore; allowRestock: boolean }) {
+  const canRestock = allowRestock && store.fridge?.status === "active";
   const label = canRestock ? "ເລີ່ມກວດ" : "ເບິ່ງຮ້ານ";
 
   return (
@@ -57,7 +57,7 @@ function StoreTaskAction({ store }: { store: DashboardStore }) {
   );
 }
 
-export function DashboardStoreTasks({ stores }: { stores: DashboardStore[] }) {
+export function DashboardStoreTasks({ stores, allowRestock = true }: { stores: DashboardStore[]; allowRestock?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const listId = useId();
   const visibleStores = expanded ? stores : stores.slice(0, INITIAL_VISIBLE_STORES);
@@ -83,7 +83,7 @@ export function DashboardStoreTasks({ stores }: { stores: DashboardStore[] }) {
                       <th scope="row"><StoreIdentity store={store} /></th>
                       <td><StoreStock stock={store.stock} /></td>
                       <td><StoreTaskStatus store={store} /></td>
-                      <td><StoreTaskAction store={store} /></td>
+                      <td><StoreTaskAction store={store} allowRestock={allowRestock} /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -96,7 +96,7 @@ export function DashboardStoreTasks({ stores }: { stores: DashboardStore[] }) {
                   <StoreIdentity store={store} />
                   <StoreStock stock={store.stock} />
                   <StoreTaskStatus store={store} />
-                  <StoreTaskAction store={store} />
+                  <StoreTaskAction store={store} allowRestock={allowRestock} />
                 </li>
               ))}
             </ul>

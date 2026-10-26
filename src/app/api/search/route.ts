@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { canRoleOpen } from "@/lib/access-policy";
+import { getCurrentSession } from "@/lib/server-session";
 
 export async function GET(request: Request) {
+  const session = await getCurrentSession();
+  if (!session) return NextResponse.json({ error: "ກະລຸນາເຂົ້າລະບົບກ່ອນ" }, { status: 401 });
+  // Results and actions only for pages this role can open.
+  const can = (href: string) => canRoleOpen(session.role, href);
   const q = new URL(request.url).searchParams.get("q")?.trim().slice(0, 80) ?? "";
   if (q.length < 2) return NextResponse.json({ results: [] });
   const [stores, fridges, batches, settlements, materials, products] = await Promise.all([
@@ -19,8 +25,8 @@ export async function GET(request: Request) {
     {id:"action-store",type:"ຄຳສັ່ງ",title:"+ ເພີ່ມຮ້ານ",detail:"ສ້າງຮ້ານໃໝ່",href:"/stores/new",keys:["store","ຮ້ານ",]},
     {id:"action-receive",type:"ຄຳສັ່ງ",title:"+ ຮັບວັດຖຸດິບ",detail:"ຮັບວັດຖຸດິບເຂົ້າສາງ",href:"/inventory/receive",keys:["receive","ຮັບວັດຖຸດິບ"]},
     {id:"action-production",type:"ຄຳສັ່ງ",title:"ໄປການຜະລິດ",detail:"ສ້າງລັອດການຜະລິດ",href:"/production",keys:["production","ຜະລິດ"]},
-  ].filter(a=>a.title.toLowerCase().includes(needle)||a.keys.some(k=>k.includes(needle)||needle.includes(k))).slice(0,4);
-  return NextResponse.json({ results: [
+  ].filter(a=>can(a.href)&&(a.title.toLowerCase().includes(needle)||a.keys.some(k=>k.includes(needle)||needle.includes(k)))).slice(0,4);
+  const results = [
     ...actions,
     ...stores.map((x) => ({ id: `store-${x.id}`, type: "ຮ້ານ", title: x.name, detail: x.address ?? "", href: `/stores/${x.id}` })),
     ...fridges.map((x) => ({ id: `fridge-${x.id}`, type: "ຕູ້ແຊ່", title: x.assetCode, detail: x.currentStore?.name ?? "ຍັງບໍ່ຜູກຮ້ານ", href: "/fridges" })),
@@ -28,5 +34,6 @@ export async function GET(request: Request) {
     ...settlements.map((x) => ({ id: `settlement-${x.id}`, type: "ບິນ", title: x.receiptNumber ?? x.id, detail: x.store.name, href: "/settlements" })),
     ...materials.map((x)=>({id:`material-${x.id}`,type:"ວັດຖຸດິບ",title:x.name,detail:`${x.code} · ${x.unit}`,href:"/inventory"})),
     ...products.map((x)=>({id:`product-${x.id}`,type:"ສິນຄ້າ",title:x.name,detail:x.code,href:"/production"})),
-  ]});
+  ].filter((result) => can(result.href));
+  return NextResponse.json({ results });
 }
