@@ -57,7 +57,8 @@ export function SectionTabs({ tabs, defaultKey, label = "ໝວດຂໍ້ມ�
           hidden={selectedIndex !== index}
           tabIndex={selectedIndex === index ? 0 : undefined}
         >
-          {selectedIndex === index ? tab.content : null}
+          {/* Inactive panels stay mounted (only hidden) so unsaved form drafts survive a tab switch. */}
+          {tab.content}
         </div>
       ))}
     </>
