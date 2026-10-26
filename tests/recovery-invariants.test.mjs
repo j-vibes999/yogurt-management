@@ -50,6 +50,10 @@ test("notifications warn about expired stock in the central store and in store f
   assert.match(data, /id:"expired-batches"/);
   assert.match(data, /id:"expired-in-fridges"/);
   assert.match(data, /expDate:\{lt:now\}/);
+  // The bell badge counts the same alerts.
+  const shell = read("src/app/api/shell-state/route.ts");
+  assert.match(shell, /expired_count/);
+  assert.match(shell, /expired_fridge_store_count/);
 });
 
 test("launchd jobs find their scripts and the server start script uses the project folder", () => {
