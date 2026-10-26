@@ -56,6 +56,13 @@ test("notifications warn about expired stock in the central store and in store f
   assert.match(shell, /expired_fridge_store_count/);
 });
 
+test("keep-awake only holds the Mac awake on mains power and can be turned off", () => {
+  const script = read("scripts/keep-awake.sh");
+  assert.match(script, /<string>\/usr\/bin\/caffeinate<\/string><string>-s<\/string>/);
+  assert.match(script, /off\)\n    launchctl bootout/);
+  for (const mode of ["On", "Off"]) assert.ok(fs.existsSync(`Keep Mac Awake - ${mode}.command`));
+});
+
 test("launchd jobs find their scripts and the server start script uses the project folder", () => {
   for (const file of ["scripts/health-check.sh", "scripts/backup-db.sh", "scripts/verify-backup-restore.sh", "scripts/server-control.sh", "scripts/lib-env.sh"]) assert.ok(fs.existsSync(file), file);
   assert.match(read("Apply Yogurt Update.command"), /migrate deploy/);
