@@ -37,4 +37,9 @@ if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
 else
   echo "Keep awake: OFF - the Mac sleeps as set in System Settings."
 fi
-pmset -g assertions 2>/dev/null | grep -E "caffeinate|PreventSystemSleep" | head -4
+PID="$(launchctl print "$DOMAIN/$LABEL" 2>/dev/null | awk '/^\tpid = /{print $3}')"
+[ -n "$PID" ] && echo "Job process: caffeinate pid $PID"
+case "$(pmset -g batt 2>/dev/null | head -1)" in
+  *"AC Power"*) echo "Power: plugged in - the Mac stays awake now." ;;
+  *"Battery Power"*) echo "Power: on battery - the Mac can still sleep until it is plugged in." ;;
+esac
