@@ -45,7 +45,9 @@ test("backup and restore verification scripts are present",()=>{
   for(const file of ["scripts/backup-db.sh","scripts/verify-backup-restore.sh","scripts/health-check.sh"]) assert.ok(fs.existsSync(file),`missing ${file}`);
   assert.ok(read("scripts/backup-db.sh").includes("pg_restore --list"));
   const restore=read("scripts/verify-backup-restore.sh");
-  assert.ok(restore.includes("pg_restore --no-owner --no-acl --exit-on-error"));
+  // Restores through plain SQL that stops at the first error (also loads dumps from newer servers).
+  assert.ok(restore.includes('restore_dump_sql "$BACKUP" "$RESTOREURL"'));
+  assert.ok(read("scripts/lib-env.sh").includes('psql "$2" -v ON_ERROR_STOP=1'));
   assert.ok(restore.includes('ACTUAL_HASH=$(shasum -a 256 "$BACKUP"'));
   for(const marker of ["FRIDGE_NEG", "BATCH_INVALID", "SETTLEMENT_INVALID"]) assert.ok(restore.includes(marker),`missing ${marker}`);
 });

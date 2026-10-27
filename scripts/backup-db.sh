@@ -7,6 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PATH="/opt/homebrew/bin:/usr/local/bin:/opt/homebrew/opt/postgresql@16/bin:/usr/local/opt/postgresql@16/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH
 . "$ROOT/scripts/lib-env.sh"
+PATH="$(pg_client_path)$PATH"
 cd "$ROOT"
 on_exit(){ rc=$?; [ "$rc" -eq 0 ] || "$ROOT/scripts/send-alert.sh" error backup.failed "PostgreSQL backup failed (exit $rc)" >/dev/null 2>&1 || true; }
 trap on_exit 0

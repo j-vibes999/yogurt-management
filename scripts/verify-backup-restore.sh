@@ -6,6 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PATH="/opt/homebrew/bin:/usr/local/bin:/opt/homebrew/opt/postgresql@16/bin:/usr/local/opt/postgresql@16/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH
 . "$ROOT/scripts/lib-env.sh"
+PATH="$(pg_client_path)$PATH"
 cd "$ROOT"
 fail(){ code="$1"; shift; msg="$*"; echo "$msg" >&2; "$ROOT/scripts/send-alert.sh" error backup.restore_verification_failed "$msg" >/dev/null 2>&1 || true; exit "$code"; }
 BACKUP=${1:-$(ls -1t "$ROOT"/.yogurt/backups/yogurt_ops-*.dump 2>/dev/null | head -1)}
@@ -15,7 +16,8 @@ CHECKSUM="$BACKUP.sha256"
 EXPECTED_HASH=$(awk 'NR==1 {print $1}' "$CHECKSUM")
 ACTUAL_HASH=$(shasum -a 256 "$BACKUP" | awk '{print $1}')
 [ -n "$EXPECTED_HASH" ] && [ "$EXPECTED_HASH" = "$ACTUAL_HASH" ] || fail 2 "Backup checksum mismatch: $BACKUP"
-DBURL=$(database_url)
+# The scratch database is made on this Mac's PostgreSQL, also after the move to Supabase.
+DBURL=$(local_database_url)
 [ -n "$DBURL" ] || fail 2 "DATABASE_URL is not set in .env"
 ADMINURL=$(node -e "const u=new URL(process.argv[1]); u.pathname='/postgres'; process.stdout.write(u.toString())" "$DBURL")
 NAME="yogurt_restore_verify_$(date '+%Y%m%d%H%M%S')_$$"
@@ -23,7 +25,7 @@ RESTOREURL=$(node -e "const u=new URL(process.argv[1]); u.pathname='/'+process.a
 cleanup(){ rc=$?; psql "$ADMINURL" -v ON_ERROR_STOP=0 -c "DROP DATABASE IF EXISTS \"$NAME\" WITH (FORCE);" >/dev/null 2>&1 || true; [ "$rc" -eq 0 ] || "$ROOT/scripts/send-alert.sh" error backup.restore_verification_failed "Restore verification failed (exit $rc)" >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
 psql "$ADMINURL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$NAME\";" >/dev/null
-pg_restore --no-owner --no-acl --exit-on-error --dbname="$RESTOREURL" "$BACKUP"
+restore_dump_sql "$BACKUP" "$RESTOREURL"
 RESULT=$(psql "$RESTOREURL" -Atc "SELECT json_build_object('users',(SELECT count(*) FROM users),'stores',(SELECT count(*) FROM stores),'materials',(SELECT count(*) FROM raw_materials),'settlements',(SELECT count(*) FROM settlements),'auditLogs',(SELECT count(*) FROM audit_logs));")
 RAW_NEG=$(psql "$RESTOREURL" -Atc "SELECT count(*) FROM raw_materials WHERE current_stock < 0;")
 FRIDGE_NEG=$(psql "$RESTOREURL" -Atc "SELECT count(*) FROM fridge_inventory WHERE current_stock < 0;")

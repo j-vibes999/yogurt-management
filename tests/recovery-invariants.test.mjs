@@ -64,13 +64,27 @@ test("keep-awake only holds the Mac awake on mains power and can be turned off",
 });
 
 test("the Supabase copy never prints the password and checks every table", () => {
+  const lib = read("scripts/lib-supabase.sh");
   const script = read("scripts/copy-db-to-supabase.sh");
-  assert.match(script, /IFS= read -rs PW/);
-  assert.match(script, /encodeURIComponent\(pw\)/);
-  assert.match(script, /sslmode", "require"/);
+  assert.match(lib, /IFS= read -rs _pw/);
+  assert.match(lib, /encodeURIComponent\(pw\)/);
+  assert.match(lib, /sslmode", "require"/);
   assert.match(script, /diff "\$WORK\/mac.txt" "\$WORK\/supabase.txt"/);
-  assert.doesNotMatch(script, /echo[^\n]*\$TARGET/);
+  for (const text of [lib, script, read("scripts/move-to-supabase.sh")]) assert.doesNotMatch(text, /echo[^\n]*\$(TARGET|_pw|APP_URL)/);
   assert.match(read(".gitignore"), /^\.yogurt\/$/m);
+});
+
+test("moving to Supabase keeps only the set-up data, backs up first and can go back", () => {
+  const move = read("scripts/move-to-supabase.sh");
+  assert.match(move, /KEEP="'_prisma_migrations','users','finished_products','recipes','recipe_items','raw_materials','expense_categories'"/);
+  assert.match(move, /UPDATE raw_materials SET current_stock = 0/);
+  assert.ok(move.indexOf("backup-db.sh") < move.indexOf("copy_database \"$LOCAL\""), "backup before copying");
+  assert.match(move, /cp -p "\$STATE\/env-before-supabase" \.env/);
+  assert.match(move, /LOCAL_DATABASE_URL=/);
+  // After the move the Mac copy must never be pushed over the live data, and scratch databases stay on this Mac.
+  assert.match(read("scripts/copy-db-to-supabase.sh"), /\^LOCAL_DATABASE_URL=/);
+  for (const file of ["scripts/verify-backup-restore.sh", "scripts/run-business-e2e.sh", "scripts/disaster-recovery-drill.sh"]) assert.match(read(file), /local_database_url/, file);
+  for (const file of ["scripts/backup-db.sh", "scripts/verify-backup-restore.sh"]) assert.match(read(file), /pg_client_path/, file);
 });
 
 test("launchd jobs find their scripts and the server start script uses the project folder", () => {

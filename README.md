@@ -23,6 +23,7 @@ Next.js 15 (App Router) · React 19 · TypeScript · Prisma 6 · PostgreSQL 16.
 | `Setup Yogurt Database.command` | One-time setup of PostgreSQL, `.env`, migrations and the first build on a new Mac. |
 | `Start Yogurt App.command` | Development server on `http://127.0.0.1:3005` (never on 3000, which the tunnel publishes). |
 | `Copy Database to Supabase.command` | Copies the database to a Supabase project (asks for the Session pooler link and password, saves the link in `.yogurt/supabase.env`), then checks the row count of every table on both sides. The site keeps using the database on this Mac. Running it again replaces the Supabase copy. |
+| `Move to Supabase.command` | Backs up the database on this Mac, copies it to Supabase, keeps only users, products and prices, recipes, raw materials with their cost (stock 0) and expense categories, points `.env` at Supabase (the old link stays as `LOCAL_DATABASE_URL`) and restarts. Goes back to the Mac database if the site does not come up. After the move, backups dump Supabase with Homebrew `libpq` tools and restore checks run on this Mac's PostgreSQL. |
 | `Keep Mac Awake - On.command` / `- Off.command` | Keep the Mac from sleeping while it is plugged in (a `caffeinate -s` launchd job, `scripts/keep-awake.sh`), so the site stays online. The display still turns off; on battery or with the lid closed the Mac still sleeps. |
 
 ## Configuration (`.env`)
