@@ -22,6 +22,7 @@ Next.js 15 (App Router) · React 19 · TypeScript · Prisma 6 · PostgreSQL 16.
 | `Change Password.command` | Set a new password (15+ characters) for an account; signs out its earlier sessions and lifts a lockout. |
 | `Setup Yogurt Database.command` | One-time setup of PostgreSQL, `.env`, migrations and the first build on a new Mac. |
 | `Start Yogurt App.command` | Development server on `http://127.0.0.1:3005` (never on 3000, which the tunnel publishes). |
+| `Copy Database to Supabase.command` | Copies the database to a Supabase project (asks for the Session pooler link and password, saves the link in `.yogurt/supabase.env`), then checks the row count of every table on both sides. The site keeps using the database on this Mac. Running it again replaces the Supabase copy. |
 | `Keep Mac Awake - On.command` / `- Off.command` | Keep the Mac from sleeping while it is plugged in (a `caffeinate -s` launchd job, `scripts/keep-awake.sh`), so the site stays online. The display still turns off; on battery or with the lid closed the Mac still sleeps. |
 
 ## Configuration (`.env`)

@@ -63,6 +63,16 @@ test("keep-awake only holds the Mac awake on mains power and can be turned off",
   for (const mode of ["On", "Off"]) assert.ok(fs.existsSync(`Keep Mac Awake - ${mode}.command`));
 });
 
+test("the Supabase copy never prints the password and checks every table", () => {
+  const script = read("scripts/copy-db-to-supabase.sh");
+  assert.match(script, /IFS= read -rs PW/);
+  assert.match(script, /encodeURIComponent\(pw\)/);
+  assert.match(script, /sslmode", "require"/);
+  assert.match(script, /diff "\$WORK\/mac.txt" "\$WORK\/supabase.txt"/);
+  assert.doesNotMatch(script, /echo[^\n]*\$TARGET/);
+  assert.match(read(".gitignore"), /^\.yogurt\/$/m);
+});
+
 test("launchd jobs find their scripts and the server start script uses the project folder", () => {
   for (const file of ["scripts/health-check.sh", "scripts/backup-db.sh", "scripts/verify-backup-restore.sh", "scripts/server-control.sh", "scripts/lib-env.sh"]) assert.ok(fs.existsSync(file), file);
   assert.match(read("Apply Yogurt Update.command"), /migrate deploy/);
