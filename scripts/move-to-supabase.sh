@@ -40,7 +40,12 @@ need_client() { PATH="$(pg_client_path)$PATH" pg_dump --version | sed 's/[^0-9]*
 if [ "$(need_client)" -lt "$SERVER_MAJOR" ]; then
   echo "ติดตั้งเครื่องมือ PostgreSQL รุ่นใหม่ (libpq) สำหรับสำรองข้อมูลจาก Supabase..."
   command -v brew >/dev/null 2>&1 || fail "ไม่พบ Homebrew สำหรับติดตั้ง libpq"
-  brew install libpq >/dev/null || fail "ติดตั้ง libpq ไม่สำเร็จ (อินเทอร์เน็ต?)"
+  installed=0
+  for attempt in 1 2 3; do
+    HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install libpq >/dev/null 2>"$WORK/brew.err" && { installed=1; break; }
+    tail -n 2 "$WORK/brew.err"; echo "ลองใหม่ ($attempt/3)..."; sleep 5
+  done
+  [ "$installed" = 1 ] || fail "ติดตั้ง libpq ไม่สำเร็จ (อินเทอร์เน็ต?)"
   [ "$(need_client)" -ge "$SERVER_MAJOR" ] || fail "pg_dump ยังเก่ากว่า Supabase"
 fi
 
