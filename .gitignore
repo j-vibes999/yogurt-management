@@ -2,7 +2,8 @@ node_modules
 .next/
 out/
 .env
-.env.local
+.env.*
+!.env.example
 *.log
 .DS_Store
 .prisma/
@@ -14,3 +15,8 @@ out/
 .npm/
 .tmp/
 *.tsbuildinfo
+
+# Database/receipt backup artifacts are private runtime data, not source.
+*.dump
+*.dump.*
+*.receipts.tar.gz*

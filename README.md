@@ -3,16 +3,17 @@
 Operations system for a yogurt consignment business: production, raw materials, store fridges,
 refills, driver audits and payments, expenses, reports and alerts. The interface is in Lao.
 
-Next.js 15 (App Router) · React 19 · TypeScript · Prisma 6 · PostgreSQL 16.
+Next.js 15 (App Router) · React 19 · TypeScript · Prisma 6 · Supabase PostgreSQL.
 
-## How production runs on this Mac
+## Current status — GitHub source, Supabase database
 
 - Supabase PostgreSQL holds the active application database (`DATABASE_URL`).
-- PostgreSQL 16 (Homebrew service) retains the pre-move `yogurt_ops` database (`LOCAL_DATABASE_URL`) and hosts disposable restore/E2E databases. Production does not write to that old copy.
-- A launchd job runs `.yogurt/start-server-public.sh` (`next start` on `127.0.0.1:3000`).
-- A Cloudflare tunnel publishes port 3000 at the public URL.
-- launchd jobs `com.yogurt.manager.health` (every 5 minutes), `com.yogurt.manager.backup` (03:15 daily)
-  and `com.yogurt.manager.backup-verify` (Sunday 03:45) run the scripts in `scripts/`. The daily backup job uses `backup-and-verify.sh` so every new daily dump is restored and checked locally.
+- Source repository: [j-vibes999/yogurt-management](https://github.com/j-vibes999/yogurt-management).
+- On 29 October 2026 the owner requested GitHub storage only and will deploy the website separately. The former Mac web server, dedicated Yogurt Cloudflare tunnel, health monitor and backup schedules are stopped and removed from automatic startup. Local maintenance PostgreSQL is stopped; its old data is retained.
+- GitHub stores code and migration files. It does not contain the database, `.env`, passwords, payment slips or backups. The existing Supabase database remains unchanged.
+- No automatic website deployment is configured in this repository. See [Deploying later](docs/DEPLOYMENT.md). Do not restore Mac background hosting or run the update/setup launcher unless the owner explicitly requests it.
+
+The older Mac helpers below remain available for deliberate manual use. They can start services when run; cloning or pushing the repository does not start them.
 
 ## Everyday tasks (double-click)
 
@@ -52,7 +53,7 @@ database); production applies them with `prisma migrate deploy` during an update
 
 More detail: `DATABASE_SETUP.md` (setup, data rules, backups, alerts), `PRODUCT.md`, `DESIGN.md`.
 
-The current [operations runbook](docs/OPERATIONS.md) covers Supabase API-role isolation, portable backups, recovery evidence, offsite archives, alerts, and the distinction between availability and readiness.
+The [operations runbook](docs/OPERATIONS.md) covers Supabase API-role isolation, portable backups, recovery evidence, offsite archives, alerts, and the retired Mac deployment. Earlier audit reports record historical releases; the current hosting state is documented above.
 
 ## Business rules in short
 

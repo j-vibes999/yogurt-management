@@ -4,6 +4,8 @@ The application is now **Prisma/PostgreSQL-first**. Demo data is used only as a 
 
 **Current production:** `DATABASE_URL` points to Supabase. `LOCAL_DATABASE_URL` retains the old Mac database and is used only as the maintenance connection for disposable local restore/E2E databases. The one-time setup below describes creating a new local installation; do not rerun it to replace the current Supabase configuration. See `docs/OPERATIONS.md` for the active deployment/recovery procedure.
 
+**Hosting status, 29 October 2026:** the owner has stopped the Mac website and all Yogurt launchd jobs, including scheduled backups/health checks, to keep code in GitHub before a later manual deployment. The local PostgreSQL service is also stopped; Supabase data is retained. The setup/update launchers below are optional historical Mac workflows and must not be run to restart public hosting without a new request. For deployment using the existing Supabase database, use `docs/DEPLOYMENT.md`.
+
 ## One-time setup
 
 Double-click:

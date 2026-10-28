@@ -1,6 +1,12 @@
 # Yogurt operations and recovery
 
-## Current deployment
+## Current hosting status
+
+On 29 October 2026 the owner requested that the code be stored in GitHub and the Mac-hosted website be retired until they deploy it themselves. Yogurt's server, dedicated tunnel, health monitor, daily backup and weekly restore jobs are unloaded and their LaunchAgent files moved out of automatic startup. The local maintenance PostgreSQL service is stopped, with data retained. The existing Supabase database and private local backup files remain unchanged. No background Mac hosting should be restored without an explicit new request.
+
+See [Deploying later](DEPLOYMENT.md). The sections below preserve the previous Mac operating/recovery procedure; job schedules describe that former setup, not active jobs.
+
+## Retired Mac deployment
 
 The Next.js server runs on this Mac at `127.0.0.1:3000` behind a Cloudflare tunnel. `DATABASE_URL` is the active Supabase database. `LOCAL_DATABASE_URL` is the old Mac database; it supplies a local maintenance connection for scratch databases, not the live application's data. Keep credentials in the ignored `.env` (mode 600). The project’s launchd jobs use its original absolute project directory.
 
