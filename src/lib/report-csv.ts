@@ -4,13 +4,15 @@ export type ReportCsvSummary = { gross: number; storeShare: number; productCost:
 export type ReportCsvContext = { from: string; to: string; timeZone: string; source: "database" | "demo"; costMode: "actual" | "estimated" };
 
 /** Quoted cell; text that a spreadsheet would run as a formula gets a leading apostrophe. */
-export function csvCell(value: string | number) {
-  const raw = typeof value === "number" ? value.toFixed(2) : value;
-  const text = (typeof value === "string" && /^[=+@\-\t\r]/.test(raw) ? "'" : "") + raw.replace(/"/g, '""');
+export type CsvCellValue = string | number | null | undefined;
+export function csvCell(value: CsvCellValue, numberFormat: "fixed" | "plain" = "fixed") {
+  const raw = typeof value === "number" && numberFormat === "fixed" ? value.toFixed(2) : String(value ?? "");
+  const formula = typeof value === "string" && /^(?:\s*[=+@-]|[\t\r\n])/.test(raw);
+  const text = (formula ? "'" : "") + raw.replace(/"/g, '""');
   return `"${text}"`;
 }
 
-const line = (cells: Array<string | number>) => cells.map(csvCell).join(",");
+const line = (cells: Array<string | number>) => cells.map(value => csvCell(value)).join(",");
 
 // Same wording as the notice on the reports page.
 const ESTIMATED_COST = "Partly estimated: cups with no recorded cost are counted at 28% of sales (ຕົ້ນທຶນບາງລາຍການໃຊ້ຕົວເລກປະຫວັດທີ່ບັນທຶກໄວ້. ສິນຄ້າທີ່ຍັງບໍ່ຮູ້ຕົ້ນທຶນໃຊ້ 28% ຂອງຍອດຂາຍເພື່ອປະເມີນ.)";

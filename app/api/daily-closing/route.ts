@@ -1,1 +1,1 @@
-export { POST } from "../../../src/app/api/daily-closing/route";
+export { GET, POST } from "../../../src/app/api/daily-closing/route";

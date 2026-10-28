@@ -9,35 +9,50 @@ export PATH
 . "$ROOT/scripts/lib-env.sh"
 PATH="$(pg_client_path)$PATH"
 cd "$ROOT"
-on_exit(){ rc=$?; [ "$rc" -eq 0 ] || "$ROOT/scripts/send-alert.sh" error backup.failed "PostgreSQL backup failed (exit $rc)" >/dev/null 2>&1 || true; }
-trap on_exit 0
-DBURL=$(database_url)
-[ -n "$DBURL" ] || { echo "DATABASE_URL is not set in .env" >&2; exit 2; }
 DIR="$ROOT/.yogurt/backups"
-STAMP=$(date '+%Y%m%d-%H%M%S')
+STAMP="$(date '+%Y%m%d-%H%M%S')-$$"
 BASE="$DIR/yogurt_ops-$STAMP"
 TMP="$BASE.dump.tmp"
 FINAL="$BASE.dump"
-mkdir -p "$DIR"
 umask 077
-pg_dump --format=custom --compress=6 --no-owner --no-acl --file="$TMP" "$DBURL"
+mkdir -p "$DIR"
+BACKUP_SOURCE_URL=$(env_value DATABASE_URL)
+export BACKUP_SOURCE_URL
+on_exit(){
+  rc=$?
+  trap - 0
+  rm -f "$TMP"
+  if [ "$rc" -ne 0 ]; then
+    node "$ROOT/scripts/backup-state.mjs" backup-failure "$DIR" >/dev/null 2>&1 || true
+    "$ROOT/scripts/send-alert.sh" error backup.failed "PostgreSQL backup failed (exit $rc)" >/dev/null 2>&1 || true
+  fi
+  exit "$rc"
+}
+trap on_exit 0
+trap 'exit 130' INT
+trap 'exit 143' TERM
+node "$ROOT/scripts/backup-state.mjs" backup-start "$DIR"
+DBURL=$(database_url)
+[ -n "$DBURL" ] || { echo "DATABASE_URL is not set in .env" >&2; exit 2; }
+dump_application_database "$TMP" "$DBURL"
 pg_restore --list "$TMP" >/dev/null
 mv "$TMP" "$FINAL"
-shasum -a 256 "$FINAL" > "$FINAL.sha256"
+(cd "$DIR" && shasum -a 256 "$(basename "$FINAL")" > "$(basename "$FINAL").sha256")
 
 # Payment-slip images live outside the database, so they are archived next to the dump.
 RECEIPTS=""
 if [ -d "$ROOT/.yogurt/private-receipts" ] && [ -n "$(ls -A "$ROOT/.yogurt/private-receipts" 2>/dev/null)" ]; then
   RECEIPTS="$BASE.receipts.tar.gz"
   tar -czf "$RECEIPTS" -C "$ROOT/.yogurt" private-receipts
-  shasum -a 256 "$RECEIPTS" > "$RECEIPTS.sha256"
+  (cd "$DIR" && shasum -a 256 "$(basename "$RECEIPTS")" > "$(basename "$RECEIPTS").sha256")
 fi
 
 OFFSITE=$(env_value BACKUP_OFFSITE_DIR)
+BACKUP_RECEIPTS="$RECEIPTS" BACKUP_OFFSITE="$([ -n "$OFFSITE" ] && printf true || printf false)" node "$ROOT/scripts/backup-state.mjs" backup-artifact "$DIR" "$FINAL"
 if [ -n "$OFFSITE" ]; then
   mkdir -p "$OFFSITE"
   PASS=$(env_value BACKUP_PASSPHRASE)
-  for FILE in "$FINAL" ${RECEIPTS:+"$RECEIPTS"}; do
+  for FILE in "$FINAL" "$FINAL.metadata.json" ${RECEIPTS:+"$RECEIPTS"}; do
     NAME=$(basename "$FILE")
     if [ -n "$PASS" ]; then
       BACKUP_PASSPHRASE="$PASS" openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BACKUP_PASSPHRASE -in "$FILE" -out "$OFFSITE/$NAME.enc.tmp"
@@ -53,8 +68,5 @@ if [ -n "$OFFSITE" ]; then
 fi
 
 find "$DIR" -type f -name 'yogurt_ops-*' -mtime +14 -delete
-printf '{"ok":true,"file":"%s","bytes":%s,"receipts":%s,"offsite":%s,"createdAt":"%s"}\n' \
-  "$(basename "$FINAL")" "$(stat -f%z "$FINAL")" \
-  "$(if [ -n "$RECEIPTS" ]; then printf '"%s"' "$(basename "$RECEIPTS")"; else printf null; fi)" \
-  "$([ -n "$OFFSITE" ] && printf true || printf false)" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$DIR/latest.json"
+BACKUP_RECEIPTS="$RECEIPTS" BACKUP_OFFSITE="$([ -n "$OFFSITE" ] && printf true || printf false)" node "$ROOT/scripts/backup-state.mjs" backup-success "$DIR" "$FINAL"
 echo "$FINAL"

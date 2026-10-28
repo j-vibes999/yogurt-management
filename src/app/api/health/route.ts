@@ -1,26 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { loadBackupReadiness } from "@/lib/backup-readiness";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-type BackupState = { ok?: boolean; createdAt?: string; file?: string; bytes?: number };
-
-async function backupState() {
-  try {
-    const raw = await fs.readFile(path.join(process.cwd(), ".yogurt", "backups", "latest.json"), "utf8");
-    const data = JSON.parse(raw) as BackupState;
-    const created = data.createdAt ? Date.parse(data.createdAt) : NaN;
-    const ageHours = Number.isFinite(created) ? Math.max(0, (Date.now() - created) / 3_600_000) : null;
-    return { ok: Boolean(data.ok) && ageHours !== null && ageHours <= 36, ageHours: ageHours === null ? null : Math.round(ageHours * 10) / 10 };
-  } catch {
-    return { ok: false, ageHours: null };
-  }
-}
 
 /** Requests that came through Cloudflare see only ok/degraded/down unless they present HEALTH_TOKEN. */
 function wantsDetails(request: Request) {
@@ -39,10 +24,10 @@ export async function GET(request: Request) {
     dbOk = true;
   } catch {}
   const dbMs = Math.round((performance.now() - started) * 10) / 10;
-  const backup = await backupState();
+  const backup = await loadBackupReadiness(process.cwd(), process.env.DATABASE_URL ?? "");
   const status = dbOk ? (backup.ok ? "ok" : "degraded") : "down";
   if (!wantsDetails(request)) return NextResponse.json({ status }, { status: dbOk ? 200 : 503, headers: { "Cache-Control": "no-store" } });
-  return NextResponse.json({ status, db: { ok: dbOk, latencyMs: dbMs }, backup, uptimeSeconds: Math.round(process.uptime()) }, {
+  return NextResponse.json({ status, availability: { ok: dbOk }, readiness: { ok: dbOk && backup.ok }, db: { ok: dbOk, latencyMs: dbMs }, backup, uptimeSeconds: Math.round(process.uptime()) }, {
     status: dbOk ? 200 : 503,
     headers: { "Cache-Control": "no-store", "Server-Timing": `db;dur=${dbMs}` },
   });

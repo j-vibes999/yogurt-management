@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createCredentialTag, signSession, SESSION_COOKIE } from "../src/lib/auth-session.ts";
 
@@ -7,7 +8,7 @@ const base = `http://127.0.0.1:${port}`;
 const secret = process.env.SESSION_SECRET;
 assert.ok(secret && secret.length >= 32, "SESSION_SECRET is required");
 const credentialTag = await createCredentialTag("offline-test", "synthetic-offline-password-hash", secret);
-const cookie = `${SESSION_COOKIE}=${await signSession({ userId: "offline-test", email: "offline@example.test", fullName: "Offline Test", role: "admin", credentialTag, exp: Math.floor(Date.now()/1000)+300 }, secret)}`;
+const cookie = `${SESSION_COOKIE}=${await signSession({ userId: "offline-test", sid: randomBytes(32).toString("base64url"), email: "offline@example.test", fullName: "Offline Test", role: "admin", credentialTag, exp: Math.floor(Date.now()/1000)+300 }, secret)}`;
 const server = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-p", String(port)], {
   env: { ...process.env, DATABASE_URL: "postgresql://offline@127.0.0.1:1/offline?schema=public", PORT: String(port), INTERNAL_APP_ORIGIN: base },
   stdio: "ignore",

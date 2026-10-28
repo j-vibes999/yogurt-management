@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import * as money from "../src/lib/money.ts";
 import { calculateSettlement, formatMoney } from "../src/lib/business.ts";
 import * as dateOnly from "../src/lib/date-only.ts";
+import * as dailyClosing from "../src/lib/daily-closing.ts";
 
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
@@ -23,7 +24,7 @@ function loadModule(file, imports, append = "") {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
   const exports = {};
-  const context = { exports, module: { exports }, Error, Date, console, process: { env: { DATABASE_URL: "memory-only" } },
+  const context = { exports, module: { exports }, Error, Date, URL, console, process: { env: { DATABASE_URL: "memory-only" } },
     require: (name) => {
       if (Object.hasOwn(imports, name)) return imports[name];
       throw new Error(`Unexpected test dependency: ${name}`);
@@ -38,8 +39,8 @@ const request = (body, operationKey = key) => new Request("https://money.test/",
   method: "POST", headers: { "Content-Type": "application/json", ...(operationKey ? { "Idempotency-Key": operationKey } : {}) }, body: JSON.stringify(body),
 });
 
-function fixture({ price = "0.05", balance = "0.00", auditFails = false, expense = null, cost = {} } = {}) {
-  let state = { receipts: [], audits: [], expenses: expense ? [expense] : [], closings: [], settlements: [], visits: [], stock: 10 };
+function fixture({ price = "0.05", balance = "0.00", auditFails = false, expense = null, closing = null, session = { userId: "admin", role: "admin" }, cost = {} } = {}) {
+  let state = { receipts: [], audits: [], expenses: expense ? [expense] : [], closings: closing ? [closing] : [], settlements: [], visits: [], stock: 10 };
   const store = { id: "store", isActive: true, commissionRate: "0.3000", fridge: { id: "fridge", assetCode: "FRIDGE" },
     fridgeInventory: [{ id: "inventory", finishedProductId: "product", currentStock: 10, lastAuditDate: null, finishedProduct: { retailPrice: price } }],
     settlements: balance === "0.00" ? [] : [{ closingBalance: balance }],
@@ -67,8 +68,10 @@ function fixture({ price = "0.05", balance = "0.00", auditFails = false, expense
     "next/server": { NextResponse: response }, zod: { z }, "node:crypto": { createHash },
     "@/lib/money": money, "@/lib/date-only": dateOnly,
     "@/lib/idempotency": idempotency,
+    "@/lib/daily-closing": dailyClosing,
+    "@/lib/prisma": { prisma: { dailyClosing: tx.dailyClosing } },
     "@/lib/business": loadModule("src/lib/business.ts", { "./money.ts": money }),
-    "@/lib/server-session": { getCurrentSession: async () => ({ userId: "admin", role: "admin" }) },
+    "@/lib/server-session": { getCurrentSession: async () => session },
     "@/lib/logger": { logError() {} },
     "@/lib/refill-summary": { refilledSinceAudit: async () => new Map() },
     "@/lib/stock-cost": { consumeFridgeLots: async () => ({ unitCost: 0, subtotalCost: 0, costKnown: true, unknownCostUnits: 0, expiredCost: 0, expiredUnknownUnits: 0, ...cost }) },
@@ -179,6 +182,60 @@ test("expense and closing reject unsupported precision and invalid calendar date
   assert.equal(f.state().expenses.length + f.state().closings.length, 0);
 });
 
+test("daily closing refuses a blind overwrite and preserves every recorded amount", async () => {
+  const closing = { id: "recorded-day", closingDate: dateOnly.parseDateOnly("2026-10-01"), cashAmount: "100.00", bankAmount: "200.00", expenseAmount: "30.00", note: "recorded" };
+  const f = fixture({ closing });
+  const result = await f.route("src/app/api/daily-closing/route.ts").POST(request({ closingDate: "2026-10-01", cashAmount: "110", bankAmount: "0", expenseAmount: "0" }));
+  assert.equal(result.status, 409, "an existing day requires the snapshot the user actually reviewed");
+  assert.deepEqual(f.state().closings[0], closing);
+  assert.equal(f.state().audits.length, 0);
+  assert.equal(f.state().receipts.length, 0);
+});
+
+test("daily closing applies a reviewed edit once and rejects another editor's stale snapshot", async () => {
+  const closing = { id: "recorded-day", closingDate: dateOnly.parseDateOnly("2026-10-01"), cashAmount: "100.00", bankAmount: "200.00", expenseAmount: "30.00", note: "recorded" };
+  const expectedSnapshot = { id: closing.id, cashAmount: "100.00", bankAmount: "200.00", expenseAmount: "30.00", note: "recorded" };
+  const f = fixture({ closing }); const route = f.route("src/app/api/daily-closing/route.ts");
+  const body = { closingDate: "2026-10-01", cashAmount: "110.00", bankAmount: "200.00", expenseAmount: "30.00", note: "corrected", expectedSnapshot };
+  const saved = await route.POST(request(body));
+  assert.equal(saved.status, 201);
+  assert.equal((await route.POST(request(body))).status, 201, "same-key retry must recover the accepted edit");
+  assert.equal(f.state().audits.length, 1);
+  assert.equal((await route.POST(request({ ...body, cashAmount: "120" }, "22222222-2222-4222-8222-222222222222"))).status, 409);
+  assert.equal(f.state().closings[0].cashAmount, "110.00");
+  assert.equal(f.state().closings[0].bankAmount, "200.00");
+});
+
+test("daily closing lookup returns the reviewed exact amounts only to administrators", async () => {
+  const closing = { id: "recorded-day", closingDate: dateOnly.parseDateOnly("2026-10-01"), cashAmount: "100.5", bankAmount: "200", expenseAmount: "30", note: null };
+  const f = fixture({ closing }); const route = f.route("src/app/api/daily-closing/route.ts");
+  const found = await route.GET(new Request("https://money.test/api/daily-closing?date=2026-10-01"));
+  assert.equal(found.status, 200);
+  assert.equal(JSON.stringify(found.body), JSON.stringify({ closingDate: "2026-10-01", snapshot: { id: "recorded-day", cashAmount: "100.50", bankAmount: "200.00", expenseAmount: "30.00", note: null } }));
+  const empty = await route.GET(new Request("https://money.test/api/daily-closing?date=2026-10-02"));
+  assert.equal(empty.body.snapshot, null);
+  assert.equal((await route.GET(new Request("https://money.test/api/daily-closing?date=2026-02-31"))).status, 400);
+  for (const [session, status] of [[null, 401], [{ userId: "driver", role: "driver" }, 403], [{ userId: "production", role: "production" }, 403]]) {
+    assert.equal((await fixture({ closing, session }).route("src/app/api/daily-closing/route.ts").GET(new Request("https://money.test/api/daily-closing?date=2026-10-01"))).status, status);
+  }
+});
+
+test("daily closing rejects a stale new-day snapshot once another request has created that date", async () => {
+  const f = fixture(); const route = f.route("src/app/api/daily-closing/route.ts");
+  const body = { closingDate: "2026-10-01", cashAmount: "100", bankAmount: "200", expenseAmount: "30", expectedSnapshot: null };
+  assert.equal((await route.POST(request(body))).status, 201);
+  assert.equal((await route.POST(request({ ...body, cashAmount: "110" }, "22222222-2222-4222-8222-222222222222"))).status, 409);
+  assert.equal(f.state().closings[0].cashAmount, "100.00");
+});
+
+test("closing responses require a complete exact-money snapshot before a form can confirm saving", () => {
+  const snapshot = { id: "closing", cashAmount: "100.00", bankAmount: "200.00", expenseAmount: "30.00", note: null };
+  assert.equal(dailyClosing.isDailyClosingSnapshot?.(snapshot), true);
+  for (const value of [{}, null, { ...snapshot, id: "" }, { ...snapshot, cashAmount: "0.001" }, { ...snapshot, bankAmount: 200 }, { ...snapshot, note: undefined }]) {
+    assert.equal(dailyClosing.isDailyClosingSnapshot?.(value), false);
+  }
+});
+
 test("historical expense edits retain an inactive store, record accounting dates, and reject stale snapshots", async () => {
   const expense = { id: "historical", category: "transport", amount: "1.00", incurredAt: dateOnly.parseDateOnly("2026-09-30"), storeId: "store", note: null, receiptUrl: null, voidedAt: null };
   const f = fixture({ expense }); f.store.isActive = false;
@@ -213,14 +270,14 @@ test("business dates and default expenses stay in the local accounting month at 
 });
 
 test("the payment form schema accepts a full fractional balance and rejects finer precision", () => {
-  const imports = { "next/link": {}, react: {}, "react/jsx-runtime": {}, "react-hook-form": {}, "@hookform/resolvers/zod": {}, zod: { z }, "@/lib/business": {}, "@/lib/toast": {}, "@/lib/pending-request": {}, "@/lib/money": money, "@/lib/operation-request": {}, "@/components/action-dialog": {} };
+  const imports = { "next/link": {}, react: {}, "react/jsx-runtime": {}, "react-hook-form": {}, "@hookform/resolvers/zod": {}, zod: { z }, "@/lib/business": {}, "@/lib/toast": {}, "@/lib/pending-request": {}, "@/lib/money": money, "@/lib/operation-request": {}, "@/components/action-dialog": {}, "@/lib/restock-draft": {}, "@/lib/use-unsaved-changes": {} };
   const form = loadModule("src/components/restock-audit-form.tsx", imports, "\nexport { paymentSchema };\n");
   assert.equal(form.paymentSchema.safeParse({ paymentMethod: "cash", paidAmount: "14000.70" }).success, true);
   assert.equal(form.paymentSchema.safeParse({ paymentMethod: "cash", paidAmount: "0.004" }).success, false);
 });
 
 test("the financial form only treats a complete monetary receipt as confirmed success", () => {
-  const imports = { "next/link": {}, react: {}, "react/jsx-runtime": {}, "react-hook-form": {}, "@hookform/resolvers/zod": {}, zod: { z }, "@/lib/business": {}, "@/lib/toast": {}, "@/lib/pending-request": {}, "@/lib/money": money, "@/lib/operation-request": {}, "@/components/action-dialog": {} };
+  const imports = { "next/link": {}, react: {}, "react/jsx-runtime": {}, "react-hook-form": {}, "@hookform/resolvers/zod": {}, zod: { z }, "@/lib/business": {}, "@/lib/toast": {}, "@/lib/pending-request": {}, "@/lib/money": money, "@/lib/operation-request": {}, "@/components/action-dialog": {}, "@/lib/restock-draft": {}, "@/lib/use-unsaved-changes": {} };
   const form = loadModule("src/components/restock-audit-form.tsx", imports, "\nexport { isCompletionResult };\n");
   const receipt = { receiptNumber: "PM-123", previousBalance: 14000.7, paidAmount: 14000.7, closingBalance: 0, paymentStatus: "paid" };
   assert.equal(form.isCompletionResult(receipt), true);

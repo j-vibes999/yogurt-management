@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { showToast } from "@/lib/toast";
 import { operationFetch } from "@/lib/operation-request";
 import { businessDateString } from "@/lib/date-only";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 type StoreOption = { id: string; name: string };
 type MaterialOption = { id: string; name: string; unit: string; stock: number };
@@ -13,9 +14,14 @@ type MaterialOption = { id: string; name: string; unit: string; stock: number };
 function useSubmit(target: string, returnTo: string) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const { allowNavigation, navigationDialog } = useUnsavedChanges(dirty);
+  const submitting = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   async function submit(payload: Record<string, unknown>) {
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -23,32 +29,38 @@ function useSubmit(target: string, returnTo: string) {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "ບັນທຶກບໍ່ສຳເລັດ");
       showToast({ tone: "success", title: "ບັນທຶກສຳເລັດ" });
+      setDirty(false);
+      allowNavigation();
       router.push(returnTo);
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "ບັນທຶກບໍ່ສຳເລັດ");
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
 
-  return { busy, error, submit };
+  return { busy, error, submit, navigationDialog, markDirty: () => setDirty(true) };
 }
 
 function ErrorNotice({ error }: { error: string | null }) {
+  const noticeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (error) noticeRef.current?.focus(); }, [error]);
   if (!error) return null;
-  return <div className="notice form-error"><strong>ບັນທຶກບໍ່ສຳເລັດ</strong><br />{error}</div>;
+  return <div ref={noticeRef} tabIndex={-1} role="alert" className="notice form-error"><strong>ບັນທຶກບໍ່ສຳເລັດ</strong><br />{error}</div>;
 }
 
 export function StoreCreateForm({ enabled }: { enabled: boolean }) {
-  const { busy, error, submit } = useSubmit("/api/stores", "/stores");
+  const { busy, error, submit, markDirty, navigationDialog } = useSubmit("/api/stores", "/stores");
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     await submit(Object.fromEntries(form.entries()));
   }
   return (
-    <form className="card form-card store-create-form-v2" onSubmit={onSubmit}>
+    <form className="card form-card store-create-form-v2" onSubmit={onSubmit} onChangeCapture={markDirty}>
+      {navigationDialog}
       <div className="store-form-split-v2">
         <div className="store-form-col-v2 color-panel">
           <div className="form-section-head-v2 color-panel-heading">
@@ -91,14 +103,15 @@ export function StoreCreateForm({ enabled }: { enabled: boolean }) {
 }
 
 export function RefillCreateForm({ stores, products, enabled }: { stores: StoreOption[]; products: { id:string; name:string; code:string }[]; enabled: boolean }) {
-  const { busy, error, submit } = useSubmit("/api/refills", "/refills");
+  const { busy, error, submit, markDirty, navigationDialog } = useSubmit("/api/refills", "/refills");
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     const items = products.map((product) => ({ finishedProductId: product.id, quantity: Number(form.get(`product_${product.id}`) || 0) })).filter((item) => item.quantity > 0);
     await submit({ storeId: form.get("storeId"), note: form.get("note"), items });
   }
   return (
-    <form className="card form-card color-panel" onSubmit={onSubmit}>
+    <form className="card form-card color-panel" onSubmit={onSubmit} onChangeCapture={markDirty}>
+      {navigationDialog}
       <div className="form-section"><div className="color-panel-heading"><span className="panel-kicker">ຄຳຂໍເຕີມສິນຄ້າ</span><h2>ສ້າງຄຳຂໍເຕີມສິນຄ້າ</h2></div>
         <div className="form-grid form-grid-2">
           <label className="field form-span-2"><span>ຮ້ານ *</span><select className="form-control" name="storeId" required defaultValue=""><option value="" disabled>ເລືອກຮ້ານ</option>{stores.map((store) => <option value={store.id} key={store.id}>{store.name}</option>)}</select></label>
@@ -113,7 +126,7 @@ export function RefillCreateForm({ stores, products, enabled }: { stores: StoreO
 }
 
 export function ExpenseCreateForm({ stores, enabled }: { stores: StoreOption[]; enabled: boolean }) {
-  const { busy, error, submit } = useSubmit("/api/expenses", "/expenses");
+  const { busy, error, submit, markDirty, navigationDialog } = useSubmit("/api/expenses", "/expenses");
   const uploadedReceipt=useRef<{fingerprint:string;url:string}|null>(null);
   const submittingExpense=useRef(false);
   const [receiptBusy,setReceiptBusy]=useState(false);
@@ -124,6 +137,8 @@ export function ExpenseCreateForm({ stores, enabled }: { stores: StoreOption[]; 
   const [newCategory,setNewCategory]=useState("");
   const [categoryBusy,setCategoryBusy]=useState(false);
   const [categoryError,setCategoryError]=useState<string | null>(null);
+  const categoryErrorRef=useRef<HTMLElement>(null);
+  useEffect(()=>{if(categoryError)categoryErrorRef.current?.focus()},[categoryError]);
 
   useEffect(()=>{
     let active=true;
@@ -169,7 +184,8 @@ export function ExpenseCreateForm({ stores, enabled }: { stores: StoreOption[]; 
     finally{submittingExpense.current=false;setReceiptBusy(false);}
   }
   return (
-    <form className="card form-card color-panel" onSubmit={onSubmit}>
+    <form className="card form-card color-panel" onSubmit={onSubmit} onChangeCapture={markDirty}>
+      {navigationDialog}
       <div className="form-section">
         <div className="color-panel-heading"><span className="panel-kicker">ລາຍຈ່າຍ</span><h2>ບັນທຶກລາຍຈ່າຍ</h2></div>
         <div className="form-grid form-grid-2">
@@ -184,7 +200,7 @@ export function ExpenseCreateForm({ stores, enabled }: { stores: StoreOption[]; 
             {categoryChoice==="__custom__"&&<input aria-label="ພິມປະເພດລາຍຈ່າຍ" className="form-control" name="category" value={customCategory} onChange={(event)=>setCustomCategory(event.target.value)} placeholder="ພິມປະເພດລາຍຈ່າຍ..." autoFocus required/>}
             {categoryChoice==="__add__"&&<div className="expense-category-add-row"><input aria-label="ຊື່ປະເພດໃໝ່" className="form-control" value={newCategory} onChange={(event)=>setNewCategory(event.target.value)} onKeyDown={(event)=>{if(event.key==="Enter"){event.preventDefault();void addExpenseCategory();}}} placeholder="ຊື່ປະເພດໃໝ່..." autoFocus/><button type="button" className="button button-secondary" onClick={()=>void addExpenseCategory()} disabled={categoryBusy}>{categoryBusy?"ກຳລັງເພີ່ມ...":"ເພີ່ມເປັນ Choice"}</button></div>}
             {categoryChoice&&categoryChoice!=="__custom__"&&categoryChoice!=="__add__"&&<input type="hidden" name="category" value={categoryChoice}/>}
-            {categoryError&&<small className="field-error">{categoryError}</small>}
+            {categoryError&&<small ref={categoryErrorRef} tabIndex={-1} className="field-error" role="alert">{categoryError}</small>}
             <small>{categoryChoice==="__custom__"?"ໃຊ້ສະເພາະລາຍການນີ້ ບໍ່ເພີ່ມເຂົ້າ Choice":categoryChoice==="__add__"?"ບັນທຶກເປັນ Choice ເພື່ອໃຊ້ໃນຄັ້ງຕໍ່ໄປ":"ເລືອກ Choice ທີ່ມີຢູ່ ຫຼືເລືອກເມນູດ້ານລຸ່ມ"}</small>
           </div>
           <label className="field"><span>ຈຳນວນເງິນ (LAK) *</span><input className="form-control" name="amount" type="number" inputMode="decimal" min="0.01" step="0.01" required /></label>
@@ -201,10 +217,11 @@ export function ExpenseCreateForm({ stores, enabled }: { stores: StoreOption[]; 
 }
 
 export function ReceiveMaterialForm({ materials, enabled }: { materials: MaterialOption[]; enabled: boolean }) {
-  const { busy, error, submit } = useSubmit("/api/inventory/receive", "/inventory");
+  const { busy, error, submit, markDirty, navigationDialog } = useSubmit("/api/inventory/receive", "/inventory");
   async function onSubmit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); await submit(Object.fromEntries(form.entries())); }
   return (
-    <form className="card form-card color-panel" onSubmit={onSubmit}>
+    <form className="card form-card color-panel" onSubmit={onSubmit} onChangeCapture={markDirty}>
+      {navigationDialog}
       <div className="form-section">
         <div className="color-panel-heading"><span className="panel-kicker">ຮັບວັດຖຸດິບ</span><h2>ຮັບວັດຖຸດິບເຂົ້າສາງ</h2></div>
         <div className="form-grid form-grid-2">
@@ -224,10 +241,11 @@ export function ReceiveMaterialForm({ materials, enabled }: { materials: Materia
 }
 
 export function InventoryAdjustmentForm({ materials, enabled }: { materials: MaterialOption[]; enabled: boolean }) {
-  const { busy, error, submit } = useSubmit("/api/inventory/adjust", "/inventory");
+  const { busy, error, submit, markDirty, navigationDialog } = useSubmit("/api/inventory/adjust", "/inventory");
   async function onSubmit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); await submit(Object.fromEntries(form.entries())); }
   return (
-    <form className="card form-card color-panel" onSubmit={onSubmit}>
+    <form className="card form-card color-panel" onSubmit={onSubmit} onChangeCapture={markDirty}>
+      {navigationDialog}
       <div className="form-section">
         <div className="color-panel-heading"><span className="panel-kicker">ປັບຍອດວັດຖຸດິບ</span><h2>ປັບຍອດວັດຖຸດິບ</h2></div>
         <div className="form-grid form-grid-2">

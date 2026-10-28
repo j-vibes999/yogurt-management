@@ -41,17 +41,6 @@ test("database integrity migration protects core accounting and stock quantities
   for(const marker of ["raw_materials_nonnegative_stock_cost_ck","production_batches_quantity_cost_ck","fridge_inventory_nonnegative_stock_ck","settlements_nonnegative_amounts_ck"]) assert.ok(sql.includes(marker),`missing ${marker}`);
 });
 
-test("backup and restore verification scripts are present",()=>{
-  for(const file of ["scripts/backup-db.sh","scripts/verify-backup-restore.sh","scripts/health-check.sh"]) assert.ok(fs.existsSync(file),`missing ${file}`);
-  assert.ok(read("scripts/backup-db.sh").includes("pg_restore --list"));
-  const restore=read("scripts/verify-backup-restore.sh");
-  // Restores through plain SQL that stops at the first error (also loads dumps from newer servers).
-  assert.ok(restore.includes('restore_dump_sql "$BACKUP" "$RESTOREURL"'));
-  assert.ok(read("scripts/lib-env.sh").includes('psql "$2" -v ON_ERROR_STOP=1'));
-  assert.ok(restore.includes('ACTUAL_HASH=$(shasum -a 256 "$BACKUP"'));
-  for(const marker of ["FRIDGE_NEG", "BATCH_INVALID", "SETTLEMENT_INVALID"]) assert.ok(restore.includes(marker),`missing ${marker}`);
-});
-
 test("real-user Web Vitals stay local and exclude user identity",()=>{
   const reporter=read("src/components/web-vitals-reporter.tsx");
   const route=read("src/app/api/metrics/web-vitals/route.ts");

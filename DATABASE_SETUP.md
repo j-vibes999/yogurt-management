@@ -2,6 +2,8 @@
 
 The application is now **Prisma/PostgreSQL-first**. Demo data is used only as a read-only fallback when `DATABASE_URL` is missing or PostgreSQL cannot be reached.
 
+**Current production:** `DATABASE_URL` points to Supabase. `LOCAL_DATABASE_URL` retains the old Mac database and is used only as the maintenance connection for disposable local restore/E2E databases. The one-time setup below describes creating a new local installation; do not rerun it to replace the current Supabase configuration. See `docs/OPERATIONS.md` for the active deployment/recovery procedure.
+
 ## One-time setup
 
 Double-click:
@@ -43,16 +45,18 @@ Every login creates a row in `user_sessions`; logging out deletes it, so a copie
 | `com.yogurt.manager.server` | always | `.yogurt/start-server-public.sh`: `next start` on `127.0.0.1:3000`; keeps the Mac awake while plugged in |
 | `com.yogurt.manager.tunnel` | always | Cloudflare tunnel that publishes port 3000 |
 | `com.yogurt.manager.health` | every 5 minutes | `scripts/health-check.sh`: checks local and public `/api/health`, retries once, alerts after `HEALTH_ALERT_AFTER` failures in a row (default 2) and reports sleep gaps |
-| `com.yogurt.manager.backup` | 03:15 daily | `scripts/backup-db.sh` |
+| `com.yogurt.manager.backup` | 03:15 daily | `scripts/backup-and-verify.sh`: dump then restore/invariant verification |
 | `com.yogurt.manager.backup-verify` | Sunday 03:45 | `scripts/verify-backup-restore.sh` |
 
 The jobs use absolute paths under `/Users/justkay/Projects/Yogurt_Super_Web`. Keep the project in that folder; if it moves, the site, the health check and the backups stop.
 
 ## Backups
 
-`scripts/backup-db.sh` writes `.yogurt/backups/yogurt_ops-<time>.dump` with a `.sha256`, archives the payment-slip images (`.yogurt/private-receipts`) next to it as `.receipts.tar.gz`, and keeps 14 days. Set `BACKUP_OFFSITE_DIR` in `.env` (for example an iCloud Drive folder) to copy every backup off this Mac, encrypted with `BACKUP_PASSPHRASE` when it is set; off-site copies are kept 30 days. Without an off-site copy, losing this Mac loses the backups too.
+`npm run db:backup` invokes `scripts/backup-and-verify.sh`. Its dump step writes `.yogurt/backups/yogurt_ops-<time>-<pid>.dump` with a `.sha256` and credential-free `.metadata.json`, archives payment-slip images (`.yogurt/private-receipts`) next to it as `.receipts.tar.gz`, and keeps 14 days. Only the application's public schema is dumped; provider extensions/schemas/publications are excluded. Homebrew `libpq` supplies the PostgreSQL 17+ dump client for Supabase. Set `BACKUP_OFFSITE_DIR` in `.env` to copy the dump, metadata and receipt archive outside this Mac; set `BACKUP_PASSPHRASE` to encrypt them. Offsite copies are kept 30 days. Losing this Mac loses locally retained backup files and receipt images unless another copy exists.
 
-`scripts/verify-backup-restore.sh` restores the newest dump into a scratch database, checks counts and invariants and the slip archive checksum, then drops the scratch database. `npm run db:dr-drill` also starts the app on the restored copy (port 3121) and runs the business E2E test against it.
+`scripts/verify-backup-restore.sh` restores the newest dump into a guarded local scratch database, checks original counts and invariants and the slip archive checksum, then drops the scratch database. `npm run db:dr-drill` also starts the app on the restored copy (port 3121) and runs authenticated/business/readiness E2E. It records original-data verification before adding synthetic clone-only fixtures and an ephemeral admin; production passwords are never required.
+
+Full readiness requires a fresh backup for the current database fingerprint, a successful latest attempt, the referenced files still present at their recorded sizes, and a successful restore bound to the same SHA-256. `/api/health` remains HTTP 200 while the DB is usable; `status: degraded` and its local readiness details identify incomplete recovery evidence. A DB connection alone is not recovery readiness.
 
 ## Alerts
 

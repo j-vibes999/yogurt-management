@@ -2,13 +2,15 @@ import { unstable_noStore as noStore } from "next/cache";
 import Link from "next/link";
 import { StoreMap } from "@/components/store-map";
 import { getMapData } from "@/lib/db-data";
+import { getCurrentSession } from "@/lib/server-session";
+import { canRoleOpen } from "@/lib/access-policy";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function MapPage() {
   noStore();
-  const { source, stores: mapStores } = await getMapData();
+  const [{ source, stores: mapStores }, session] = await Promise.all([getMapData(), getCurrentSession()]);
 
   return (
     <>
@@ -20,8 +22,8 @@ export default async function MapPage() {
             <p>ຄົ້ນຫາຮ້ານ, ເບິ່ງຈຳນວນຄົງເຫຼືອ/ສະຖານະຕູ້, ຮອບກວດ, ການເຕີມສິນຄ້າ ແລະຍອດຄ້າງໃນໜ້າດຽວ.</p>
           </div>
           <div className="page-actions">
-            <Link prefetch={false} className="button button-secondary" href="/driver">ຮອບກວດ</Link>
-            <Link prefetch={false} className="button button-primary" href="/stores/new">+ ເພີ່ມຮ້ານ</Link>
+            {canRoleOpen(session?.role, "/driver") && <Link prefetch={false} className="button button-secondary" href="/driver">ຮອບກວດ</Link>}
+            {canRoleOpen(session?.role, "/stores/new") && <Link prefetch={false} className="button button-primary" href="/stores/new">+ ເພີ່ມຮ້ານ</Link>}
           </div>
         </div>
 
@@ -31,7 +33,7 @@ export default async function MapPage() {
           </div>
         )}
 
-        <StoreMap stores={mapStores} />
+        <StoreMap stores={mapStores} role={session?.role ?? null} />
       </div>
     </>
   );

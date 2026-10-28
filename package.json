@@ -18,16 +18,17 @@
     "verify": "prisma validate && prisma generate && eslint . && tsc --noEmit && node --test tests/*.test.mjs && next build",
     "auth:set-admin": "node --env-file=.env scripts/set-admin-password.mjs",
     "test:e2e": "node --env-file=.env tests/authenticated-smoke.mjs",
-    "db:backup": "./scripts/backup-db.sh",
+    "db:backup": "./scripts/backup-and-verify.sh",
+    "db:backup:dump": "./scripts/backup-db.sh",
     "db:verify-backup": "./scripts/verify-backup-restore.sh",
     "health:check": "./scripts/health-check.sh",
     "server": "./scripts/server-control.sh",
     "metrics:summary": "node scripts/web-vitals-summary.mjs",
-    "test:e2e:business": "./scripts/run-business-e2e.sh",
+    "test:e2e:business": "E2E_ADDITIONAL_SCRIPT=tests/readiness-workflow-e2e.mjs ./scripts/run-business-e2e.sh",
     "test:e2e:offline": "node --env-file=.env tests/offline-fallback-e2e.mjs",
     "metrics:vitals": "node scripts/web-vitals-summary.mjs",
     "alerts:test": "ALERT_COOLDOWN_SECONDS=0 ./scripts/send-alert.sh warning alert.test \"YoguManage alert test\"",
-    "db:dr-drill": "./scripts/disaster-recovery-drill.sh"
+    "db:dr-drill": "E2E_ADDITIONAL_SCRIPT=tests/readiness-workflow-e2e.mjs ./scripts/disaster-recovery-drill.sh"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

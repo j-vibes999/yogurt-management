@@ -11,6 +11,8 @@ import { financialStorageKeys, legacyFinancialRequests, parsePendingRequest, pen
 import { ActionDialog } from "@/components/action-dialog";
 import { moneyDecimalString, moneyNumber, parseMoneyCents, parseWholeCount, roundMoneyCents } from "@/lib/money";
 import { freshOperationUser, operationFetch } from "@/lib/operation-request";
+import { restockDraftContent, restoreRestockDraft } from "@/lib/restock-draft";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 type AuditLine = { productId:string; name:string; color:string; retailPrice:number; previousStock:number; refilledSinceAudit:number };
 type LineEntry = { countRemaining:string; countExpiredReturned:string; countRefilled:number };
@@ -37,7 +39,9 @@ export function RestockAuditForm({ store, fridge, lines, previousBalance, paymen
   const [legacyRequests,setLegacyRequests]=useState<LegacyFinancialRequest[]>([]);
   const [reviewLegacy,setReviewLegacy]=useState(false);
   const [entries,setEntries]=useState<Record<string,LineEntry>>(()=>Object.fromEntries(lines.map(line=>[line.productId,{countRemaining:String(line.previousStock),countExpiredReturned:"0",countRefilled:line.refilledSinceAudit}])));
-  const [saved,setSaved]=useState(false);
+  const [savedContent,setSavedContent]=useState<string|null>(null);
+  const [failedContent,setFailedContent]=useState<string|null>(null);
+  const [draftBaseline,setDraftBaseline]=useState<string|null>(null);
   const [draftNotice,setDraftNotice]=useState<string|null>(null);
   const {register,watch,setValue,formState:{errors:paymentErrors}}=useForm<PaymentValues>({resolver:zodResolver(paymentSchema),defaultValues:{paymentMethod:"cash",paidAmount:"0"}});
   const paymentMethod=watch("paymentMethod");
@@ -50,6 +54,15 @@ export function RestockAuditForm({ store, fridge, lines, previousBalance, paymen
   const [step,setStep]=useState<1|2|3>(1);
   const [stepChanged,setStepChanged]=useState(false);
   const stepHeadingRef=useRef<HTMLHeadingElement>(null);
+  const errorRef=useRef<HTMLDivElement>(null);
+  const draftContext=useMemo(()=>({storeId:store.id,fridgeAssetCode:fridge.assetCode,previousBalance,commissionRate:store.commissionRate,snapshot:lines.map(line=>[line.productId,line.previousStock,line.refilledSinceAudit,line.retailPrice])}),[store.id,fridge.assetCode,previousBalance,store.commissionRate,lines]);
+  const draftContent=restockDraftContent(draftContext,{entries,paymentMethod,paidAmount});
+  const saved=!completion&&savedContent===draftContent;
+  const draftReady=Boolean(userId)&&draftBaseline!==null;
+  const unsavedDraft=!completion&&draftBaseline!==null&&draftContent!==savedContent&&(draftContent!==draftBaseline||savedContent!==null||failedContent!==null);
+  const {navigationDialog}=useUnsavedChanges(unsavedDraft||(!completion&&Boolean(storageNotice)&&(Boolean(pendingPayment)||Boolean(pendingVisit))));
+
+  useEffect(()=>{if(error)errorRef.current?.focus();},[error]);
 
   useEffect(()=>{
     if(stepChanged&&!paymentFirst)stepHeadingRef.current?.focus();
@@ -65,34 +78,44 @@ export function RestockAuditForm({ store, fridge, lines, previousBalance, paymen
 
   useEffect(()=>{
     if(!userId)return;
-    setPendingPayment(parsePendingRequest(pendingStorage.read(paymentStorageKey),store.id));
-    setPendingVisit(parsePendingRequest(pendingStorage.read(visitStorageKey),store.id));
+    const paymentRaw=pendingStorage.read(paymentStorageKey),visitRaw=pendingStorage.read(visitStorageKey);
+    const payment=parsePendingRequest(paymentRaw,store.id),visit=parsePendingRequest(visitRaw,store.id);
+    setPendingPayment(payment);setPendingVisit(visit);
+    if((payment&&paymentRaw&&!pendingStorage.isPersisted(paymentStorageKey,paymentRaw))||(visit&&visitRaw&&!pendingStorage.isPersisted(visitStorageKey,visitRaw)))setStorageNotice("Browser ບໍ່ສາມາດເກັບຄຳຂໍໄວ້ໄດ້. ກະລຸນາເປີດໜ້ານີ້ໄວ້ ແລະລອງຄຳຂໍເກົ່າຈົນຢືນຢັນຜົນ.");
     setLegacyRequests(legacyFinancialRequests(store.id));
   },[paymentStorageKey,visitStorageKey,store.id,userId]);
 
   useEffect(()=>{
     if(!userId)return;
-    try {
-      const raw=pendingStorage.read(storageKey);
-      if(!raw)return;
-      const draft=JSON.parse(raw) as Record<string,unknown>;
-      const snapshot=lines.map(line=>[line.productId,line.previousStock,line.refilledSinceAudit,line.retailPrice]);
-      if(draft.storeId!==store.id||draft.fridgeAssetCode!==fridge.assetCode||draft.previousBalance!==previousBalance||draft.commissionRate!==store.commissionRate||JSON.stringify(draft.snapshot)!==JSON.stringify(snapshot)){
-        setDraftNotice("ຂໍ້ມູນສະບັບຮ່າງເກົ່າກວ່າ Stock ປັດຈຸບັນ. ກະລຸນານັບສິນຄ້າໃໝ່.");
-        return;
-      }
-      const stored=draft.entries as Record<string,LineEntry>;
-      if(!stored||lines.some(line=>!stored[line.productId]||typeof stored[line.productId].countRemaining!=="string"||typeof stored[line.productId].countExpiredReturned!=="string"||!/^[0-9]*$/.test(stored[line.productId].countRemaining)||!/^[0-9]*$/.test(stored[line.productId].countExpiredReturned))){
-        setDraftNotice("ສະບັບຮ່າງອ່ານບໍ່ໄດ້. ກະລຸນານັບສິນຄ້າໃໝ່.");
-        return;
-      }
-      setEntries(Object.fromEntries(lines.map(line=>[line.productId,{countRemaining:stored[line.productId].countRemaining,countExpiredReturned:stored[line.productId].countExpiredReturned,countRefilled:line.refilledSinceAudit}])));
-      if(draft.paymentMethod==="cash"||draft.paymentMethod==="bank")setValue("paymentMethod",draft.paymentMethod);
-      if(typeof draft.paidAmount==="string"&&/^\d*(?:\.\d*)?$/.test(draft.paidAmount))setValue("paidAmount",draft.paidAmount);
-      setSaved(true);
-      setDraftNotice("ກູ້ຄືນສະບັບຮ່າງແລ້ວ. ກະລຸນາກວດຈຳນວນກ່ອນບັນທຶກ.");
-    } catch {setDraftNotice("ສະບັບຮ່າງອ່ານບໍ່ໄດ້. ກະລຸນານັບສິນຄ້າໃໝ່.");}
-  },[storageKey,store.id,store.commissionRate,fridge.assetCode,previousBalance,lines,setValue,userId]);
+    const raw=pendingStorage.read(storageKey);
+    const restored=restoreRestockDraft(raw,draftContext);
+    setSavedContent(null);
+    if(restored.status==="valid"){
+      setEntries(restored.values.entries);
+      setValue("paymentMethod",restored.values.paymentMethod);
+      setValue("paidAmount",restored.values.paidAmount);
+      const content=restockDraftContent(draftContext,restored.values);
+      const persisted=raw!==null&&pendingStorage.isPersisted(storageKey,raw);
+      setDraftBaseline(persisted?content:"");setSavedContent(persisted?content:null);setFailedContent(persisted?null:content);
+      setDraftNotice(persisted?"ກູ້ຄືນສະບັບຮ່າງແລ້ວ. ກະລຸນາກວດຈຳນວນກ່ອນບັນທຶກ.":"ກູ້ຄືນຂໍ້ມູນໃນໜ້ານີ້ແລ້ວ, ແຕ່ Browser ຍັງເກັບສະບັບຮ່າງບໍ່ໄດ້. ກະລຸນາເປີດໜ້ານີ້ໄວ້.");
+    }else{
+      const defaults={entries:Object.fromEntries(lines.map(line=>[line.productId,{countRemaining:String(line.previousStock),countExpiredReturned:"0",countRefilled:line.refilledSinceAudit}])),paymentMethod:"cash" as const,paidAmount:"0"};
+      setEntries(defaults.entries);setValue("paymentMethod",defaults.paymentMethod);setValue("paidAmount",defaults.paidAmount);setFailedContent(null);
+      setDraftBaseline(restockDraftContent(draftContext,defaults));
+      if(restored.status==="stale")setDraftNotice("ຂໍ້ມູນສະບັບຮ່າງເກົ່າກວ່າ Stock ປັດຈຸບັນ. ກະລຸນານັບສິນຄ້າໃໝ່.");
+      else if(restored.status==="invalid")setDraftNotice("ສະບັບຮ່າງອ່ານບໍ່ໄດ້. ກະລຸນານັບສິນຄ້າໃໝ່.");
+    }
+  },[storageKey,draftContext,lines,setValue,userId]);
+
+  useEffect(()=>{
+    if(!userId||!unsavedDraft||completion)return;
+    const timer=window.setTimeout(()=>{
+      const persisted=pendingStorage.write(storageKey,draftContent);
+      setSavedContent(persisted?draftContent:null);setFailedContent(persisted?null:draftContent);
+      setDraftNotice(persisted?null:"Browser ບໍ່ສາມາດເກັບສະບັບຮ່າງໄດ້. ຂໍ້ມູນຈະຢູ່ໃນໜ້ານີ້ເທົ່ານັ້ນ. ກະລຸນາເປີດໜ້ານີ້ໄວ້.");
+    },250);
+    return()=>window.clearTimeout(timer);
+  },[draftContent,storageKey,userId,unsavedDraft,completion]);
 
   const toNonNegativeInt=(value:string)=>parseWholeCount(value)??0;
   const hasInvalidCounts=lines.some(line=>parseWholeCount(entries[line.productId].countRemaining)===null||parseWholeCount(entries[line.productId].countExpiredReturned)===null);
@@ -115,15 +138,16 @@ export function RestockAuditForm({ store, fridge, lines, previousBalance, paymen
   const paymentAmountExceeds=paidCents!==null&&paidCents>totalDueCents;
   const remainingAfterPayment=moneyNumber(totalDueCents>(paidCents??BigInt(0))?totalDueCents-(paidCents??BigInt(0)):BigInt(0));
 
-  function update(productId:string,field:"countRemaining"|"countExpiredReturned",value:string){setSaved(false);setCompletion(null);setError(null);setEntries(c=>({...c,[productId]:{...c[productId],[field]:value}}))}
+  function update(productId:string,field:"countRemaining"|"countExpiredReturned",value:string){setCompletion(null);setError(null);setEntries(c=>({...c,[productId]:{...c[productId],[field]:value}}))}
   function adjust(productId:string,field:"countRemaining"|"countExpiredReturned",delta:number){const curr=toNonNegativeInt(entries[productId]?.[field]??"0");update(productId,field,String(Math.max(0,curr+delta)))}
   function remember(key:string,request:PendingRequest){
     if(!pendingStorage.write(key,JSON.stringify(request)))setStorageNotice("Browser ບໍ່ສາມາດເກັບຄຳຂໍໄວ້ໄດ້. ກະລຸນາເປີດໜ້ານີ້ໄວ້ ແລະລອງຄຳຂໍເກົ່າຈົນຢືນຢັນຜົນ.");
   }
   function saveDraft(){
     if(!userId)return;
-    const persisted=pendingStorage.write(storageKey,JSON.stringify({storeId:store.id,fridgeAssetCode:fridge.assetCode,previousBalance,commissionRate:store.commissionRate,snapshot:lines.map(line=>[line.productId,line.previousStock,line.refilledSinceAudit,line.retailPrice]),entries,paymentMethod,paidAmount,savedAt:new Date().toISOString()}));
-    setSaved(persisted);setDraftNotice(persisted?null:"Browser ບໍ່ສາມາດເກັບສະບັບຮ່າງໄດ້. ຂໍ້ມູນຈະຢູ່ໃນໜ້ານີ້ເທົ່ານັ້ນ.");
+    if(completion)return;
+    const persisted=pendingStorage.write(storageKey,draftContent);
+    setSavedContent(persisted?draftContent:null);setFailedContent(persisted?null:draftContent);setDraftNotice(persisted?null:"Browser ບໍ່ສາມາດເກັບສະບັບຮ່າງໄດ້. ຂໍ້ມູນຈະຢູ່ໃນໜ້ານີ້ເທົ່ານັ້ນ.");
   }
 
   async function completePaymentOnly(){
@@ -139,7 +163,7 @@ export function RestockAuditForm({ store, fridge, lines, previousBalance, paymen
       const data=await r.json().catch(()=>({}));
       if(!r.ok){if([400,404,409].includes(r.status)&&data.retryable===false){pendingStorage.remove(paymentStorageKey);setPendingPayment(null)}throw new Error(data.error||'ບໍ່ສາມາດຮັບເງິນໄດ້')}
       if(!isCompletionResult(data))throw new Error("ຍັງຢືນຢັນຜົນຮັບເງິນບໍ່ໄດ້. ກະລຸນາລອງຄຳຂໍເກົ່າອີກຄັ້ງ");
-      pendingStorage.remove(paymentStorageKey);setPendingPayment(null);setStorageNotice(null);setCompletion(data);showToast({tone:'success',title:'ບັນທຶກຮັບເງິນສຳເລັດ',message:data.receiptNumber});
+      pendingStorage.remove(paymentStorageKey);pendingStorage.remove(storageKey);setSavedContent(null);setPendingPayment(null);setStorageNotice(null);setCompletion(data);showToast({tone:'success',title:'ບັນທຶກຮັບເງິນສຳເລັດ',message:data.receiptNumber});
     }catch(e){setError(e instanceof Error?e.message:'ບໍ່ສາມາດຮັບເງິນໄດ້')}finally{setSubmitting(false)}
   }
 
@@ -156,7 +180,7 @@ export function RestockAuditForm({ store, fridge, lines, previousBalance, paymen
       const data=await r.json().catch(()=>({}));
       if(!r.ok){if([400,404,409].includes(r.status)&&data.retryable===false){pendingStorage.remove(visitStorageKey);setPendingVisit(null)}throw new Error(data.error||'ບໍ່ສາມາດປິດຍອດໄດ້')}
       if(!isCompletionResult(data))throw new Error("ຍັງຢືນຢັນຜົນປິດຮອບບໍ່ໄດ້. ກະລຸນາລອງຄຳຂໍເກົ່າອີກຄັ້ງ");
-      pendingStorage.remove(visitStorageKey);setPendingVisit(null);pendingStorage.remove(storageKey);setSaved(false);setStorageNotice(null);setCompletion(data);showToast({tone:'success',title:'ປິດຍອດສຳເລັດ',message:data.receiptNumber});
+      pendingStorage.remove(visitStorageKey);setPendingVisit(null);pendingStorage.remove(storageKey);setSavedContent(null);setStorageNotice(null);setCompletion(data);showToast({tone:'success',title:'ປິດຍອດສຳເລັດ',message:data.receiptNumber});
     }catch(e){setError(e instanceof Error?e.message:'ບໍ່ສາມາດປິດຍອດໄດ້')}finally{setSubmitting(false)}
   }
 
@@ -168,19 +192,21 @@ export function RestockAuditForm({ store, fridge, lines, previousBalance, paymen
       <div className="total color-metric-domain"><span>ລວມຕ້ອງຮັບ</span><strong>{formatMoney(totalDue)}</strong></div>
     </div>
     <div className="payment-entry-grid-v7">
-      <label className="field"><span>ຈຳນວນເງິນທີ່ຮັບ</span><input className="number-input payment-amount-v7" inputMode="decimal" min={0} max={totalDue} step="0.01" type="number" {...register("paidAmount")} aria-invalid={paymentAmountInvalid||paymentAmountExceeds||!!paymentErrors.paidAmount} aria-describedby={paymentAmountInvalid||paymentAmountExceeds?'restock-payment-validation':undefined}/>{(paymentAmountInvalid||paymentAmountExceeds)&&<small id="restock-payment-validation" className="field-error" role="alert">{paymentAmountInvalid?'ຈຳນວນເງິນຕ້ອງບໍ່ຕິດລົບ ແລະມີບໍ່ເກີນ 2 ຕຳແໜ່ງ':'ຈຳນວນເງິນເກີນຍອດທີ່ຕ້ອງຮັບ'}</small>}</label>
-      <label className="field"><span>ວິທີຊຳລະ</span><select className="number-input" {...register("paymentMethod")}><option value="cash">ເງິນສົດ</option><option value="bank">ໂອນທະນາຄານ</option></select></label>
+      <label className="field"><span>ຈຳນວນເງິນທີ່ຮັບ</span><input className="number-input payment-amount-v7" inputMode="decimal" min={0} max={totalDue} step="0.01" type="number" disabled={!draftReady} {...register("paidAmount")} aria-invalid={paymentAmountInvalid||paymentAmountExceeds||!!paymentErrors.paidAmount} aria-describedby={paymentAmountInvalid||paymentAmountExceeds?'restock-payment-validation':undefined}/>{(paymentAmountInvalid||paymentAmountExceeds)&&<small id="restock-payment-validation" className="field-error" role="alert">{paymentAmountInvalid?'ຈຳນວນເງິນຕ້ອງບໍ່ຕິດລົບ ແລະມີບໍ່ເກີນ 2 ຕຳແໜ່ງ':'ຈຳນວນເງິນເກີນຍອດທີ່ຕ້ອງຮັບ'}</small>}</label>
+      <label className="field"><span>ວິທີຊຳລະ</span><select className="number-input" disabled={!draftReady} {...register("paymentMethod")}><option value="cash">ເງິນສົດ</option><option value="bank">ໂອນທະນາຄານ</option></select></label>
     </div>
-    {totalDue>0&&<button type="button" className="button button-secondary payment-full-v7" onClick={()=>setValue("paidAmount", moneyDecimalString(totalDueCents))}>ຮັບເຕັມຈຳນວນ {formatMoney(totalDue)}</button>}
+    {totalDue>0&&<button type="button" className="button button-secondary payment-full-v7" disabled={!draftReady} onClick={()=>setValue("paidAmount", moneyDecimalString(totalDueCents))}>ຮັບເຕັມຈຳນວນ {formatMoney(totalDue)}</button>}
     <div className={`payment-after-v7 ${remainingAfterPayment===0&&totalDue>0?'is-paid color-metric-success':remainingAfterPayment>0?'color-metric-warning':'color-metric-neutral'}`}><span>ຄົງເຫຼືອຫຼັງຮັບ</span><strong>{formatMoney(remainingAfterPayment)}</strong></div>
     {paymentFirst&&pendingPayment&&<div className="notice" role="status">ມີຄຳຂໍຮັບເງິນ {formatMoney(pendingPayment.paidAmount)} ທີ່ຍັງບໍ່ຮູ້ຜົນ. ກົດປຸ່ມດ້ານລຸ່ມເພື່ອກວດຄຳຂໍເກົ່າກ່ອນ.</div>}
-    {error&&<div className="notice payment-error-v7"><strong>ບັນທຶກບໍ່ສຳເລັດ</strong><br/>{error}</div>}
-    {completion&&<div className="notice completion-v5"><div><strong>ບັນທຶກສຳເລັດ · {completion.receiptNumber}</strong><br/>ຮັບ {formatMoney(completion.paidAmount)} · ຄົງເຫຼືອ {formatMoney(completion.closingBalance)}</div><Link className="button button-primary" href="/settlements">ກັບລາຍການ →</Link></div>}
-    {paymentFirst&&<button className="button button-primary payment-primary-v7" type="button" aria-busy={submitting} disabled={!userId||legacyRequests.length>0||submitting||Boolean(completion)||(!pendingPayment&&(paidAmountValue<=0||paymentAmountInvalid||paymentAmountExceeds))} onClick={completePaymentOnly}>{submitting?'ກຳລັງບັນທຶກ...':completion?'ຮັບເງິນແລ້ວ ✓':pendingPayment?'ກວດຄຳຂໍຮັບເງິນເກົ່າ':'ບັນທຶກຮັບເງິນ'}</button>}
+    {userId&&error&&<div ref={errorRef} tabIndex={-1} className="notice payment-error-v7" role="alert"><strong>ບັນທຶກບໍ່ສຳເລັດ</strong><br/>{error}</div>}
+    {completion&&<div className="notice completion-v5" role="status"><div><strong>ບັນທຶກສຳເລັດ · {completion.receiptNumber}</strong><br/>ຮັບ {formatMoney(completion.paidAmount)} · ຄົງເຫຼືອ {formatMoney(completion.closingBalance)}</div><Link className="button button-primary" href="/settlements">ກັບລາຍການ →</Link></div>}
+    {paymentFirst&&<button className="button button-primary payment-primary-v7" type="button" aria-busy={submitting} disabled={!draftReady||legacyRequests.length>0||submitting||Boolean(completion)||(!pendingPayment&&(paidAmountValue<=0||paymentAmountInvalid||paymentAmountExceeds))} onClick={completePaymentOnly}>{submitting?'ກຳລັງບັນທຶກ...':completion?'ຮັບເງິນແລ້ວ ✓':pendingPayment?'ກວດຄຳຂໍຮັບເງິນເກົ່າ':'ບັນທຶກຮັບເງິນ'}</button>}
   </section>;
 
   return <>
-    {!userId&&error&&<div className="notice form-error" role="alert">{error}</div>}
+    {navigationDialog}
+    {!userId&&error&&<div ref={errorRef} tabIndex={-1} className="notice form-error" role="alert">{error}</div>}
+    <div className="draft-save-status" role="status" aria-live="polite">{!completion&&(saved?"ເກັບສະບັບຮ່າງແລ້ວ ✓":failedContent===draftContent?"ຍັງເກັບສະບັບຮ່າງບໍ່ໄດ້":unsavedDraft?"ກຳລັງເກັບສະບັບຮ່າງ…":"")}</div>
     {storageNotice&&<div className="notice" role="status">{storageNotice}</div>}
     {legacyRequests.length>0&&<section className="notice" role="status">
       <strong>ມີຄຳຂໍເກົ່າທີ່ຍັງບໍ່ຮູ້ຜົນ</strong>
@@ -206,8 +232,8 @@ export function RestockAuditForm({ store, fridge, lines, previousBalance, paymen
         {!paymentFirst&&pendingVisit&&<div className="notice" role="status">ມີຄຳຂໍປິດຮອບທີ່ຮັບເງິນ {formatMoney(pendingVisit.paidAmount)} ແລະຍັງບໍ່ຮູ້ຜົນ. ກົດປຸ່ມດ້ານລຸ່ມເພື່ອກວດຄຳຂໍເກົ່າກ່ອນ.</div>}
         {(paymentFirst||step===1)&&<>
           <div className="restock-mini-summary-v7"><div className="color-metric-domain"><span>ຂາຍໄດ້</span><strong>{unitsSold} ຖ້ວຍ</strong></div><div className={expiredUnits>0?'color-metric-warning':'color-metric-neutral'}><span>ເສຍ / ໝົດອາຍຸ</span><strong>{expiredUnits}</strong></div><div className="color-metric-domain color-domain-finance"><span>ຍອດຂາຍລວມ</span><strong>{formatMoney(settlement.grossAmount)}</strong></div></div>
-        {results.map(line=><section className="card audit-card" key={line.productId}><div className="audit-product"><span className="product-dot" style={{background:line.color}}/><div style={{flex:1}}><strong>{line.name}</strong><div className="store-meta">{formatMoney(line.retailPrice)} / ຖ້ວຍ</div></div></div><div className="audit-grid"><div className="field"><label>ຈຳນວນກ່ອນນັບ</label><div className="readonly-box">{line.previousStock}</div></div><div className="field"><label>ຄົງເຫຼືອຈິງ</label><div className="audit-stepper-wrap-v1"><button type="button" className="stepper-btn-v1" onClick={()=>adjust(line.productId,'countRemaining',-1)} aria-label="ຫຼຸດ 1">-1</button><input className="number-input stepper-input-v1" aria-label={`${line.name} ຄົງເຫຼືອຈິງ`} min={0} type="number" value={entries[line.productId].countRemaining} onChange={e=>update(line.productId,'countRemaining',e.target.value)}/><button type="button" className="stepper-btn-v1" onClick={()=>adjust(line.productId,'countRemaining',1)} aria-label="ເພີ່ມ 1">+1</button><button type="button" className="stepper-btn-v1 stepper-btn-jump-v1" onClick={()=>adjust(line.productId,'countRemaining',5)} aria-label="ເພີ່ມ 5">+5</button></div></div><div className="field"><label>ເສຍ / ໝົດອາຍຸ</label><div className="audit-stepper-wrap-v1"><button type="button" className="stepper-btn-v1" onClick={()=>adjust(line.productId,'countExpiredReturned',-1)} aria-label="ຫຼຸດ 1">-1</button><input className="number-input stepper-input-v1" aria-label={`${line.name} ເສຍ ຫຼື ໝົດອາຍຸ`} min={0} type="number" value={entries[line.productId].countExpiredReturned} onChange={e=>update(line.productId,'countExpiredReturned',e.target.value)}/><button type="button" className="stepper-btn-v1" onClick={()=>adjust(line.productId,'countExpiredReturned',1)} aria-label="ເພີ່ມ 1">+1</button></div></div><div className="field"><label>ຈຳນວນເຕີມໃນຮອບ</label><div className="readonly-box">{entries[line.productId].countRefilled}</div></div></div><div className={`audit-result ${line.hasNegativeSale?'warning':''}`}><div><div className="kicker">ຂາຍ</div><strong>{line.unitsSold} ຖ້ວຍ</strong></div><div style={{textAlign:'right'}}><div className="kicker">ຍອດ</div><strong>{formatMoney(line.subtotalGross)}</strong></div></div>{line.hasNegativeSale&&<p className="danger-text">ຈຳນວນຂາຍຕິດລົບ — ກວດຈຳນວນອີກຄັ້ງ.</p>}</section>)}
-          {!paymentFirst&&<div className="audit-flow-actions"><button type="button" className="button button-ghost" onClick={saveDraft} disabled={!userId}>{saved?'ເກັບສະບັບຮ່າງແລ້ວ ✓':'ເກັບສະບັບຮ່າງ'}</button><button type="button" className="button button-primary" disabled={hasReconciliationError} onClick={()=>goToStep(2)}>ຕໍ່ໄປ: ຮັບເງິນ →</button></div>}
+        {results.map(line=><section className="card audit-card" key={line.productId}><div className="audit-product"><span className="product-dot" style={{background:line.color}}/><div style={{flex:1}}><strong>{line.name}</strong><div className="store-meta">{formatMoney(line.retailPrice)} / ຖ້ວຍ</div></div></div><div className="audit-grid"><div className="field"><label>ຈຳນວນກ່ອນນັບ</label><div className="readonly-box">{line.previousStock}</div></div><div className="field"><label>ຄົງເຫຼືອຈິງ</label><div className="audit-stepper-wrap-v1"><button type="button" className="stepper-btn-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countRemaining',-1)} aria-label="ຫຼຸດ 1">-1</button><input className="number-input stepper-input-v1" aria-label={`${line.name} ຄົງເຫຼືອຈິງ`} min={0} type="number" disabled={!draftReady} value={entries[line.productId].countRemaining} onChange={e=>update(line.productId,'countRemaining',e.target.value)}/><button type="button" className="stepper-btn-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countRemaining',1)} aria-label="ເພີ່ມ 1">+1</button><button type="button" className="stepper-btn-v1 stepper-btn-jump-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countRemaining',5)} aria-label="ເພີ່ມ 5">+5</button></div></div><div className="field"><label>ເສຍ / ໝົດອາຍຸ</label><div className="audit-stepper-wrap-v1"><button type="button" className="stepper-btn-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countExpiredReturned',-1)} aria-label="ຫຼຸດ 1">-1</button><input className="number-input stepper-input-v1" aria-label={`${line.name} ເສຍ ຫຼື ໝົດອາຍຸ`} min={0} type="number" disabled={!draftReady} value={entries[line.productId].countExpiredReturned} onChange={e=>update(line.productId,'countExpiredReturned',e.target.value)}/><button type="button" className="stepper-btn-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countExpiredReturned',1)} aria-label="ເພີ່ມ 1">+1</button></div></div><div className="field"><label>ຈຳນວນເຕີມໃນຮອບ</label><div className="readonly-box">{entries[line.productId].countRefilled}</div></div></div><div className={`audit-result ${line.hasNegativeSale?'warning':''}`}><div><div className="kicker">ຂາຍ</div><strong>{line.unitsSold} ຖ້ວຍ</strong></div><div style={{textAlign:'right'}}><div className="kicker">ຍອດ</div><strong>{formatMoney(line.subtotalGross)}</strong></div></div>{line.hasNegativeSale&&<p className="danger-text">ຈຳນວນຂາຍຕິດລົບ — ກວດຈຳນວນອີກຄັ້ງ.</p>}</section>)}
+          {!paymentFirst&&<div className="audit-flow-actions"><button type="button" className="button button-ghost" onClick={saveDraft} disabled={!draftReady}>{saved?'ເກັບສະບັບຮ່າງແລ້ວ ✓':'ເກັບສະບັບຮ່າງ'}</button><button type="button" className="button button-primary" disabled={hasReconciliationError} onClick={()=>goToStep(2)}>ຕໍ່ໄປ: ຮັບເງິນ →</button></div>}
         </>}
         {!paymentFirst&&step===2&&<>
           {paymentCard}
@@ -221,9 +247,9 @@ export function RestockAuditForm({ store, fridge, lines, previousBalance, paymen
             <div><span>ວິທີຊຳລະ</span><strong>{paymentMethod==='bank'?'ໂອນທະນາຄານ':'ເງິນສົດ'}</strong></div>
             <div><span>ຍອດຄ້າງຫຼັງຮັບ</span><strong>{formatMoney(remainingAfterPayment)}</strong></div>
           </div>
-          {error&&<div className="notice payment-error-v7" role="alert"><strong>ບັນທຶກບໍ່ສຳເລັດ</strong><br/>{error}</div>}
+          {error&&<div ref={errorRef} tabIndex={-1} className="notice payment-error-v7" role="alert"><strong>ບັນທຶກບໍ່ສຳເລັດ</strong><br/>{error}</div>}
           {completion&&<div className="notice completion-v5" role="status"><div><strong>ບັນທຶກສຳເລັດ · {completion.receiptNumber}</strong><br/>ຮັບ {formatMoney(completion.paidAmount)} · ຄົງເຫຼືອ {formatMoney(completion.closingBalance)}</div><Link className="button button-primary" href="/settlements">ກັບລາຍການ →</Link></div>}
-        <div className="summary-sticky restock-final-v7"><div className="summary-row"><span>ຍອດຄ້າງເກົ່າ</span><strong>{formatMoney(previousBalance)}</strong></div><div className="summary-row"><span>ຍອດໃໝ່ຮອບນີ້</span><strong>{formatMoney(settlement.netPayableAmount)}</strong></div><div className="summary-row total"><span>ລວມກ່ອນຮັບເງິນ</span><strong>{formatMoney(previousBalance+settlement.netPayableAmount)}</strong></div><button className="button button-primary" type="button" aria-busy={submitting} disabled={!userId||legacyRequests.length>0||submitting||Boolean(completion)||(!pendingVisit&&(hasReconciliationError||paymentAmountInvalid||paymentAmountExceeds))} onClick={completeVisit}>{submitting?'ກຳລັງບັນທຶກ...':completion?'ປິດຍອດແລ້ວ ✓':pendingVisit?'ກວດຄຳຂໍປິດຮອບເກົ່າ':hasReconciliationError?'ແກ້ຈຳນວນກ່ອນ':'ບັນທຶກການກວດ ແລະປິດຍອດ'}</button><details className="audit-ສະບັບຮ່າງ-v6"><summary>ຍັງກວດບໍ່ແລ້ວ?</summary><div><button className="button button-ghost" type="button" aria-label="ເກັບ ສະບັບຮ່າງ ການກວດຮ້ານ" onClick={saveDraft} disabled={!userId}>{saved?'ເກັບໄວ້ແລ້ວ ✓':'ເກັບ ສະບັບຮ່າງ'}</button></div></details></div>
+        <div className="summary-sticky restock-final-v7"><div className="summary-row"><span>ຍອດຄ້າງເກົ່າ</span><strong>{formatMoney(previousBalance)}</strong></div><div className="summary-row"><span>ຍອດໃໝ່ຮອບນີ້</span><strong>{formatMoney(settlement.netPayableAmount)}</strong></div><div className="summary-row total"><span>ລວມກ່ອນຮັບເງິນ</span><strong>{formatMoney(previousBalance+settlement.netPayableAmount)}</strong></div><button className="button button-primary" type="button" aria-busy={submitting} disabled={!draftReady||legacyRequests.length>0||submitting||Boolean(completion)||(!pendingVisit&&(hasReconciliationError||paymentAmountInvalid||paymentAmountExceeds))} onClick={completeVisit}>{submitting?'ກຳລັງບັນທຶກ...':completion?'ປິດຍອດແລ້ວ ✓':pendingVisit?'ກວດຄຳຂໍປິດຮອບເກົ່າ':hasReconciliationError?'ແກ້ຈຳນວນກ່ອນ':'ບັນທຶກການກວດ ແລະປິດຍອດ'}</button><details className="audit-ສະບັບຮ່າງ-v6"><summary>ຍັງກວດບໍ່ແລ້ວ?</summary><div><button className="button button-ghost" type="button" aria-label="ເກັບ ສະບັບຮ່າງ ການກວດຮ້ານ" onClick={saveDraft} disabled={!draftReady}>{saved?'ເກັບໄວ້ແລ້ວ ✓':'ເກັບ ສະບັບຮ່າງ'}</button></div></details></div>
 
           <div className="audit-flow-actions"><button type="button" className="button button-ghost" onClick={()=>goToStep(2)} disabled={submitting||Boolean(completion)}>← ກັບໄປຮັບເງິນ</button></div>
         </>}

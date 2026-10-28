@@ -55,7 +55,7 @@ grep -E "^# (pass|fail)" "$STATE/update-tests.log"
 
 echo
 echo "2/7 · Database backup"
-scripts/backup-db.sh > "$STATE/update-backup.log" 2>&1 || { tail -n 20 "$STATE/update-backup.log"; stop_here "the database backup failed. Nothing was changed."; }
+scripts/backup-and-verify.sh > "$STATE/update-backup.log" 2>&1 || { tail -n 20 "$STATE/update-backup.log"; stop_here "the database backup or restore verification failed. Nothing was changed."; }
 BACKUP_FILE="$(tail -n 1 "$STATE/update-backup.log")"
 [ -f "$BACKUP_FILE" ] || stop_here "the database backup did not produce a file. Nothing was changed."
 echo "Backup: $BACKUP_FILE"

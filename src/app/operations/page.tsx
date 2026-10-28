@@ -8,6 +8,8 @@ import { MasterDataManagement } from "@/components/master-data-management";
 import { RecipeManager } from "@/components/recipe-manager";
 import { SectionTabs } from "@/components/section-tabs";
 import { ClosingForm } from "@/components/operations-forms";
+import { loadBackupReadiness } from "@/lib/backup-readiness";
+import { ResponsiveDisclosure } from "@/components/responsive-disclosure";
 
 export const dynamic="force-dynamic";
 export const revalidate=0;
@@ -26,12 +28,13 @@ async function getLatestBackup(){
 
 export default async function OperationsPage(){
   noStore();
-  const [recipes,materials,products,fridges,latestBackup]=await Promise.all([
+  const [recipes,materials,products,fridges,latestBackup,backupReadiness]=await Promise.all([
     prisma.recipe.findMany({where:{isDefault:true},include:{finishedProduct:true,items:{include:{rawMaterial:true}}}}),
     prisma.rawMaterial.findMany({orderBy:{name:"asc"}}),
     prisma.finishedProduct.findMany({orderBy:{name:"asc"}}),
     prisma.fridge.findMany({select:{id:true,status:true}}),
     getLatestBackup(),
+    loadBackupReadiness(process.cwd(),process.env.DATABASE_URL??""),
   ]);
 
   const activeProducts=products.filter(x=>x.isActive).length;
@@ -54,9 +57,9 @@ export default async function OperationsPage(){
         <h1>ຈັດການລະບົບ</h1>
         <p>ຈັດການສິນຄ້າ, ວັດຖຸດິບ ແລະສູດການຜະລິດ. ປິດຍອດປະຈຳວັນໄດ້ດ້ານລຸ່ມ.</p>
       </div>
-      <div className="operations-health-v43" aria-label="ສະຖານະລະບົບ">
+      <div className="operations-health-v43" data-readiness={backupReadiness.ok?"ready":"warning"} aria-label="ສະຖານະລະບົບ">
         <span className="operations-health-dot-v43" aria-hidden="true"/>
-        <span>ລະບົບປົກກະຕິ</span>
+        <span>{backupReadiness.ok?"ລະບົບປົກກະຕິ":"ກວດກາການສຳຮອງຂໍ້ມູນ"}</span>
       </div>
     </header>
 
@@ -80,10 +83,9 @@ export default async function OperationsPage(){
       ]}/>
     </main>
 
-    <details className="responsive-disclosure-v33 color-domain-finance">
-      <summary><span><strong>ປິດຍອດປະຈຳວັນ</strong><small>ບັນທຶກເງິນສົດ, ເງິນໂອນ ແລະລາຍຈ່າຍ</small></span></summary>
-      <div className="responsive-disclosure-content-v33"><ClosingForm/></div>
-    </details>
+    <ResponsiveDisclosure title="ປິດຍອດປະຈຳວັນ" summary="ບັນທຶກເງິນສົດ, ເງິນໂອນ ແລະລາຍຈ່າຍ" className="color-domain-finance">
+      <ClosingForm/>
+    </ResponsiveDisclosure>
 
     <section className="operations-secondary-v43" aria-label="ເຄື່ອງມື ແລະສະຖານະລະບົບ">
       <div className="operations-tools-v43 color-panel">
@@ -110,7 +112,7 @@ export default async function OperationsPage(){
         </div>
         <div className="operations-status-v43">
           <div><span><Database size={15} aria-hidden="true"/>PostgreSQL</span><strong>Connected</strong></div>
-          <div><span><Archive size={15} aria-hidden="true"/>Backup</span><strong className={latestBackup?undefined:"is-warning"}>{latestBackup?"Ready":"Missing"}</strong></div>
+          <div><span><Archive size={15} aria-hidden="true"/>Backup</span><strong className={backupReadiness.ok?undefined:"is-warning"}>{backupReadiness.ok?"ກູ້ຄືນໄດ້":backupReadiness.restoreVerified?"ຕ້ອງກວດກາ":"ຍັງບໍ່ຢືນຢັນການກູ້ຄືນ"}</strong></div>
         </div>
         {latestBackup&&<div className="operations-backup-v43"><span>Backup ຫຼ້າສຸດ</span><strong>{latestBackup.date}</strong><small>{latestBackup.sizeMb} MB</small></div>}
       </aside>

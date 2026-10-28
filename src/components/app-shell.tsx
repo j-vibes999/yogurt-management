@@ -229,6 +229,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className={`app-shell ${menuOpen ? "is-menu-open" : ""}`}>
+      <a className="app-skip-link" href="#main-content">ຂ້າມໄປເນື້ອຫາຫຼັກ</a>
       <button type="button" className={`sidebar-backdrop ${menuOpen ? "is-visible" : ""}`} aria-label="ປິດເມນູ" tabIndex={-1} aria-hidden="true" onClick={() => setMenuOpen(false)} />
 
       <aside className={`sidebar ${menuOpen ? "is-open" : ""}`} id={sidebarId} ref={sidebarRef} inert={mobileViewport && !menuOpen} role={menuOpen ? "dialog" : undefined} aria-modal={menuOpen || undefined} aria-label="ເມນູຫຼັກ">
@@ -302,7 +303,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <div className={`page-stage ${routeMotion ? "is-route-entering-safe" : ""}`}>{children}</div>
+        <div id="main-content" tabIndex={-1} className={`page-stage ${routeMotion ? "is-route-entering-safe" : ""}`}>{children}</div>
 
         <nav className="mobile-bottom-nav" aria-label="ເມນູດ່ວນມືຖື">
           {mobileItems.filter((item) => !item.roles || (session && item.roles.includes(session.role))).map((item) => {

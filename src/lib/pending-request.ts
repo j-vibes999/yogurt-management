@@ -16,6 +16,9 @@ export function createPendingStorage(getStorage: () => BrowserStorage) {
       memory.set(key, value);
       try { getStorage().setItem(key, value); return true; } catch { return false; }
     },
+    isPersisted(key: string, value: string): boolean {
+      try { return getStorage().getItem(key) === value; } catch { return false; }
+    },
     remove(key: string) {
       memory.delete(key);
       try { getStorage().removeItem(key); } catch { /* Storage can be disabled. */ }

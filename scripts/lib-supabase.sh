@@ -3,6 +3,8 @@
 # and SSL required. It reuses .yogurt/supabase.env when the person presses Return.
 # The link and password are never printed.
 SUPABASE_SAVED="$ROOT/.yogurt/supabase.env"
+PATH="$(pg_client_path)$PATH"
+export PATH
 
 supabase_target() {
   TARGET=""
@@ -75,8 +77,10 @@ SQL
 
 # Copies every table from the database at $1 into the (empty) database at $2.
 copy_database() {
-  pg_dump -Fc --no-owner --no-acl -f "$WORK/copy.dump" "$1" || return 1
+  dump_application_database "$WORK/copy.dump" "$1" || return 1
   # Supabase already has the public schema and its extensions; restore only our own objects.
-  pg_restore -l "$WORK/copy.dump" | grep -v -E '^[0-9]+; [0-9]+ [0-9]+ (SCHEMA|EXTENSION|COMMENT) ' > "$WORK/copy.list"
+  pg_restore -l "$WORK/copy.dump" > "$WORK/copy.list.raw" || return 1
+  grep -v -E '^[0-9]+; [0-9]+ [0-9]+ (SCHEMA|EXTENSION|COMMENT) ' "$WORK/copy.list.raw" > "$WORK/copy.list" || return 1
   pg_restore --no-owner --no-acl --exit-on-error -L "$WORK/copy.list" -d "$2" "$WORK/copy.dump" 2>"$WORK/restore.err" || { tail -n 5 "$WORK/restore.err"; return 1; }
+  DATABASE_URL="$2" node "$ROOT/scripts/harden-supabase-api.mjs" || return 1
 }

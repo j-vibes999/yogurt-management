@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { createCredentialTag, createSessionId, getSessionSecret, SESSION_COOKIE, signSession } from "@/lib/auth-session";
 import { hashPassword, verifyPassword } from "@/lib/password";
-import { checkLoginRateLimit, loginIpRateKey, recordLoginFailure } from "@/lib/login-rate-limit";
+import { loginIpRateKey, reserveLoginAttempt } from "@/lib/login-rate-limit";
 import { clientIp, lockoutUntil, oneAttemptAtATime, recordUnknownEmailFailure, unknownEmailLockedUntil } from "@/lib/login-security";
 import { logInfo, logWarn } from "@/lib/logger";
 import { emailSchema } from "@/lib/user-input";
@@ -33,31 +33,29 @@ export async function POST(request: Request) {
   if (!secret) return NextResponse.json({ error: "ການຕັ້ງຄ່າຄວາມປອດໄພຂອງລະບົບຍັງບໍ່ສົມບູນ" }, { status: 503 });
   const ip = clientIp(request.headers);
   const ipKey = loginIpRateKey(ip);
-  const ipLimit = checkLoginRateLimit(ipKey);
+  const ipLimit = reserveLoginAttempt(ipKey);
   if (!ipLimit.allowed) {
     logWarn("auth.login_rate_limited", { ip });
     return tooManyAttempts(ipLimit.retryAfter);
   }
   const parsed = inputSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
-    recordLoginFailure(ipKey);
     return NextResponse.json({ error: INVALID_LOGIN }, { status: 400, headers: NO_STORE });
   }
   const { email, password } = parsed.data;
   const userAgent = request.headers.get("user-agent")?.slice(0, 200) || null;
 
-  return oneAttemptAtATime(email, () => attempt({ email, password, ip, ipKey, userAgent, secret }));
+  return oneAttemptAtATime(email, () => attempt({ email, password, ip, userAgent, secret }));
 }
 
-type Attempt = { email: string; password: string; ip: string; ipKey: string; userAgent: string | null; secret: string };
+type Attempt = { email: string; password: string; ip: string; userAgent: string | null; secret: string };
 
-async function attempt({ email, password, ip, ipKey, userAgent, secret }: Attempt) {
+async function attempt({ email, password, ip, userAgent, secret }: Attempt) {
   const now = new Date();
   const user = await prisma.user.findUnique({ where: { email } });
   // Real accounts lock in the database (so an admin password reset unlocks them); unknown emails lock the same way in memory.
   const lockedUntil = user ? user.lockedUntil : unknownEmailLockedUntil(email, now.getTime());
   if (lockedUntil && lockedUntil > now) {
-    recordLoginFailure(ipKey);
     logWarn("auth.login_locked", { userId: user?.id ?? null, ip });
     return tooManyAttempts((lockedUntil.getTime() - now.getTime()) / 1000);
   }
@@ -66,7 +64,6 @@ async function attempt({ email, password, ip, ipKey, userAgent, secret }: Attemp
   const hasPassword = Boolean(user?.passwordHash.startsWith("scrypt$"));
   const passwordMatches = await verifyPassword(password, hasPassword ? user!.passwordHash : await getDecoyHash()) && hasPassword;
   if (!user || !user.isActive || !passwordMatches) {
-    recordLoginFailure(ipKey);
     let newLock: Date | null;
     if (user) {
       const { failedLoginCount } = await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: { increment: 1 } }, select: { failedLoginCount: true } });

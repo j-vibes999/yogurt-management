@@ -69,7 +69,7 @@ async function main(){
   assert.equal((await fetch(base+'/api/session',{headers:{cookie}})).status,200,'resetting one user must keep another user session working');
 
   const product=await prisma.finishedProduct.findFirst({
-    where:{isActive:true,recipes:{some:{isDefault:true}}},
+    where:{...(process.env.E2E_FIXTURE_PRODUCT_ID?{id:process.env.E2E_FIXTURE_PRODUCT_ID}:{}),isActive:true,recipes:{some:{isDefault:true}}},
     include:{recipes:{where:{isDefault:true},orderBy:{version:'desc'},take:1,include:{items:{include:{rawMaterial:true}}}}},
   });
   assert.ok(product?.recipes[0]?.items.length,'active product with recipe required');
@@ -92,7 +92,7 @@ async function main(){
     assert.ok(Number(material.currentStock)>=0,`material ${material.name} must stay non-negative`);
   }
 
-  const store=await prisma.store.findFirst({where:{isActive:true,fridge:{isNot:null}},include:{fridge:true,fridgeInventory:true}}); assert.ok(store?.fridge,'active store with fridge required');
+  const store=await prisma.store.findFirst({where:{...(process.env.E2E_FIXTURE_STORE_ID?{id:process.env.E2E_FIXTURE_STORE_ID}:{}),isActive:true,fridge:{isNot:null}},include:{fridge:true,fridgeInventory:true}}); assert.ok(store?.fridge,'active store with fridge required');
   const refill=await jsonFetch('/api/refills',{method:'POST',headers,body:JSON.stringify({storeId:store.id,note:'E2E cloned DB',items:[{finishedProductId:product.id,quantity:1}]})});
   assert.equal(refill.r.status,201,`refill must succeed: ${JSON.stringify(refill.body)}`);
   const refillRow=await prisma.refillRequest.findUnique({where:{id:refill.body.id},include:{items:true}});

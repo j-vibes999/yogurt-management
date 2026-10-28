@@ -29,6 +29,13 @@ export function checkLoginRateLimit(key: string, now = Date.now()) {
   return { allowed: false, retryAfter: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)) };
 }
 
+/** Reserve the shared IP budget synchronously, before reading a body or verifying a password. */
+export function reserveLoginAttempt(key: string, now = Date.now()) {
+  const limit = checkLoginRateLimit(key, now);
+  if (limit.allowed) recordLoginFailure(key, now);
+  return limit;
+}
+
 export function recordLoginFailure(key: string, now = Date.now()) {
   prune(now);
   const existing = buckets.get(key);

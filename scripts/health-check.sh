@@ -5,7 +5,7 @@
 # A long gap since the previous check means this Mac was asleep or off; that is reported once.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 export PATH
 . "$ROOT/scripts/lib-env.sh"
 DIR="$ROOT/.yogurt/health"
@@ -19,7 +19,7 @@ NOW_EPOCH=$(date +%s)
 LAST_EPOCH=$(cat "$DIR/last-check-epoch" 2>/dev/null || echo 0)
 printf '%s' "$NOW_EPOCH" > "$DIR/last-check-epoch"
 if [ "$LAST_EPOCH" -gt 0 ] 2>/dev/null && [ $((NOW_EPOCH - LAST_EPOCH)) -gt 900 ]; then
-  "$ROOT/scripts/send-alert.sh" warning health.gap "No health check for $(((NOW_EPOCH - LAST_EPOCH) / 60)) minutes: this Mac was asleep or off, so the public site was offline." >/dev/null 2>&1 || true
+  "$ROOT/scripts/send-alert.sh" warning health.gap "No health check for $(((NOW_EPOCH - LAST_EPOCH) / 60)) minutes; check this Mac and its network connection." >/dev/null 2>&1 || true
 fi
 
 status_of() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(s).status||"down"))}catch{process.stdout.write("down")}})'; }
