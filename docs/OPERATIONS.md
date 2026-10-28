@@ -6,6 +6,8 @@ The Next.js server runs on this Mac at `127.0.0.1:3000` behind a Cloudflare tunn
 
 The Mac, power, lid/sleep state and internet connection still affect web availability. Moving the database did not move the Next.js process. No concurrent-user capacity is promised without a separate measured load test.
 
+The app's user LaunchAgents are `com.yogurt.manager.server`, `.tunnel`, `.health`, `.backup` and `.backup-verify` under `~/Library/LaunchAgents`. They require this user's GUI login after reboot. The dedicated tunnel is named `yogurt-manager`; this Mac also has a separate system Cloudflare daemon for another tunnel. Check tunnel IDs before treating those processes as duplicates. Do not stop or reconfigure the unrelated tunnel. Daily backup is scheduled at 03:15, weekly restore Sunday 03:45, and health checks every 5 minutes in the Mac's timezone.
+
 ## Application database security
 
 The application uses Prisma and its own server-validated sessions. Supabase `anon`/`authenticated` roles must have no table, column, sequence or backend-routine privileges on application data. Migration `20261028090000_backend_api_isolation` enables RLS without FORCE, revokes client/PUBLIC grants on the explicit application inventory, and removes permissive future defaults for the backend creator. Owners/bypass roles retain backend SQL access; managed schemas and extension routines remain outside the inventory.
