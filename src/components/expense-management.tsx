@@ -69,8 +69,9 @@ export function ExpenseVoidButton({ id, enabled }: { id: string; enabled: boolea
   );
 }
 
-export function ExpenseEditForm({ expense, stores, enabled, modal = false, onCancel, onSaved }: { expense: EditableExpense; stores: StoreOption[]; enabled: boolean; modal?: boolean; onCancel?: () => void; onSaved?: () => void }) {
+export function ExpenseEditForm({ expense, stores, enabled, modal = false, onCancel, onSaved, onBusyChange }: { expense: EditableExpense; stores: StoreOption[]; enabled: boolean; modal?: boolean; onCancel?: () => void; onSaved?: () => void; onBusyChange?: (busy: boolean) => void }) {
   const amountErrorId = useId();
+  const dateErrorId = useId();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +88,7 @@ export function ExpenseEditForm({ expense, stores, enabled, modal = false, onCan
   const submit = handleSubmit(async (values) => {
     if (!enabled || busy) return;
     setBusy(true);
+    onBusyChange?.(true);
     setError(null);
     try {
       let receiptUrl = expense.receiptUrl ?? "";
@@ -116,17 +118,18 @@ export function ExpenseEditForm({ expense, stores, enabled, modal = false, onCan
       setError(caught instanceof Error ? caught.message : "ບໍ່ສາມາດແກ້ລາຍຈ່າຍໄດ້");
     } finally {
       setBusy(false);
+      onBusyChange?.(false);
     }
   });
 
   return (
-    <form className={modal ? "expense-edit-form-v22" : "card form-card color-panel"} onSubmit={submit} noValidate>
+    <form className={modal ? "expense-edit-form-v22" : "card form-card color-panel"} onSubmit={submit} noValidate aria-busy={busy}>
       <div className="form-section">
         {!modal && <div className="color-panel-heading"><span className="panel-kicker">ແກ້ໄຂລາຍຈ່າຍ</span><h2>ແກ້ໄຂລາຍຈ່າຍ</h2></div>}
         <div className="form-grid form-grid-2">
           <label className="field"><span>ປະເພດ</span><input className="form-control" data-expense-edit-autofocus {...register("category")} list="expense-edit-category-options" aria-invalid={!!errors.category} placeholder="ພິມປະເພດລາຍຈ່າຍ..." autoComplete="off" required /><datalist id="expense-edit-category-options"><option value="ຄ່າໄຟ"/><option value="ຄ່ານ້ຳມັນ"/><option value="ຄ່າຂົນສົ່ງ"/><option value="ຄ່າສ້ອມແປງ"/><option value="ຄ່າເຊົ່າ"/><option value="ຄ່າອຸປະກອນ"/><option value="ອື່ນໆ"/></datalist>{errors.category && <small className="field-error" role="alert">{errors.category.message}</small>}</label>
           <label className="field"><span>ຈຳນວນເງິນ (LAK) *</span><input className="form-control" {...register("amount")} type="number" inputMode="decimal" min="0.01" step="0.01" required aria-invalid={!!errors.amount} aria-describedby={errors.amount ? amountErrorId : undefined} />{errors.amount && <small id={amountErrorId} className="field-error" role="alert">{errors.amount.message}</small>}</label>
-          <label className="field"><span>ວັນທີ</span><input className="form-control" {...register("incurredAt")} type="date" /></label>
+          <label className="field"><span>ວັນທີ *</span><input className="form-control" {...register("incurredAt")} type="date" required aria-invalid={!!errors.incurredAt} aria-describedby={errors.incurredAt ? dateErrorId : undefined} />{errors.incurredAt && <small id={dateErrorId} className="field-error" role="alert">{errors.incurredAt.message}</small>}</label>
           <label className="field"><span>ຮ້ານ</span><select className="form-control" {...register("storeId")}><option value="">ລາຍຈ່າຍກາງ</option>{expense.storeId && !stores.some((store) => store.id === expense.storeId) && <option value={expense.storeId}>{expense.storeName || "ຮ້ານເດີມ"} · ປິດໃຊ້ງານ</option>}{stores.map((store) => <option value={store.id} key={store.id}>{store.name}</option>)}</select></label>
           <label className="field form-span-2"><span>ໝາຍເຫດ</span><textarea className="form-control form-textarea" {...register("note")} rows={3} /></label>
           <label className="field form-span-2"><span>ໃບເສັດ / ຫຼັກຖານໃໝ່</span><input className="form-control" ref={receiptRef} name="receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" />{expense.receiptUrl && <small>ມີໄຟລ໌ແລ້ວ: <a href={expense.receiptUrl} target="_blank" rel="noreferrer">ເບິ່ງໃບເສັດ</a></small>}</label>

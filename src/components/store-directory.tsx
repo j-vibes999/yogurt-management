@@ -4,6 +4,8 @@ import Link from "next/link";
 import { EmptyState } from "@/components/empty-state";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { StoreDeactivateButton } from "@/components/store-management";
+import { canRoleOpen } from "@/lib/access-policy";
+import type { UserRole } from "@/lib/auth-session";
 
 type StoreItem = {
   id: string;
@@ -20,17 +22,28 @@ type StoreItem = {
 
 type FilterKey = "attention" | "all" | "due" | "low" | "maintenance";
 
-export function StoreDirectory({ stores, enabled }: { stores: StoreItem[]; enabled: boolean }) {
+export function StoreDirectory({ stores, enabled, role }: { stores: StoreItem[]; enabled: boolean; role: UserRole | null }) {
   const listId = useId();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterKey>("attention");
   const [sort, setSort] = useState<"priority"|"name"|"stock">("priority");
   const [menuId, setMenuId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const canAudit = enabled && canRoleOpen(role, "/driver");
+  const canManage = enabled && canRoleOpen(role, "/stores/new");
   const menuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    const close = (event: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuId(null); };
-    document.addEventListener("mousedown", close); return () => document.removeEventListener("mousedown", close);
+    // The confirmation is portaled outside this menu and must remain mounted while it is open.
+    const confirmationOpen = () => Boolean(document.querySelector('[role="dialog"][data-state="open"]'));
+    const close = (event: MouseEvent) => { if (!confirmationOpen() && menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuId(null); };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || confirmationOpen() || !menuRef.current) return;
+      menuRef.current.querySelector<HTMLButtonElement>("button")?.focus();
+      setMenuId(null);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
   }, []);
 
   const counts = useMemo(() => ({
@@ -100,7 +113,7 @@ export function StoreDirectory({ stores, enabled }: { stores: StoreItem[]; enabl
             return (
               <article className="store-card-v4" key={store.id}>
                 <div className="store-card-main-v4">
-                  <div className="store-card-title-v4"><span className={`store-state-v4 ${statusClass}`} /><div><Link prefetch={false} className="store-title-link-v1" href={`/stores/${store.id}`}><strong>{store.name}</strong><span aria-hidden="true">↗</span></Link><span>{store.contactName} · {store.phone}</span></div></div>
+                  <div className="store-card-title-v4"><span className={`store-state-v4 ${statusClass}`} /><div>{enabled ? <Link prefetch={false} className="store-title-link-v1" href={`/stores/${store.id}`}><strong>{store.name}</strong><span aria-hidden="true">↗</span></Link> : <strong>{store.name}</strong>}<span>{store.contactName} · {store.phone}</span></div></div>
                   <p>{store.address}</p>
                 </div>
                 <div className="store-card-fridge-v4">
@@ -116,9 +129,9 @@ export function StoreDirectory({ stores, enabled }: { stores: StoreItem[]; enabl
                 <div className="store-card-actions-v4">
                   <span className={`store-status-v4 ${statusClass}`}>{statusLabel}</span>
                   <div className="store-action-line-v7" ref={menuId === store.id ? menuRef : undefined}>
-                    <Link href={`/driver/restock/${store.id}`} className="button button-primary store-check-v7">ກວດຮ້ານ</Link>
-                    <button type="button" className="store-more-v7" aria-label={`ຈັດການ ${store.name}`} aria-expanded={menuId === store.id} onClick={() => setMenuId(menuId === store.id ? null : store.id)}>•••</button>
-                    {menuId === store.id && <div className="store-more-menu-v7">
+                    {canAudit && store.fridge ? <Link href={`/driver/restock/${store.id}`} className="button button-primary store-check-v7">ກວດຮ້ານ</Link> : enabled && <Link href={`/stores/${store.id}`} className="button button-secondary store-check-v7">ເບິ່ງຮ້ານ</Link>}
+                    {canManage && <button type="button" className="store-more-v7" aria-label={`ຈັດການ ${store.name}`} aria-expanded={menuId === store.id} aria-controls={`${listId}-menu-${store.id}`} onClick={() => setMenuId(menuId === store.id ? null : store.id)}>•••</button>}
+                    {canManage && menuId === store.id && <div className="store-more-menu-v7" id={`${listId}-menu-${store.id}`}>
                       <Link prefetch={false} href={`/stores/${store.id}`}>ເບິ່ງພາບລວມຮ້ານ</Link>
                       <Link prefetch={false} href={`/stores/${store.id}/edit`}>ແກ້ໄຂຮ້ານ</Link>
                       <div className="store-more-danger-v7"><StoreDeactivateButton id={store.id} name={store.name} enabled={enabled} /></div>
@@ -132,7 +145,12 @@ export function StoreDirectory({ stores, enabled }: { stores: StoreItem[]; enabl
         {filtered.length>5&&<button type="button" className="progressive-toggle-v33" aria-controls={listId} aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)}>{expanded?"ຍໍ້ລາຍການ":"ເບິ່ງທັງໝົດ"} · {filtered.length} ຮ້ານ</button>}
         </>
       ) : (
-        <EmptyState icon="store" title="ບໍ່ພົບຮ້ານ" description="ລອງປ່ຽນຄຳຄົ້ນຫາ ຫຼື ຕົວກອງ." action={<button type="button" className="button button-secondary" onClick={() => { setQuery(""); setFilter("attention"); }}>ລ້າງ ຕົວກອງ</button>} />
+        <EmptyState
+          icon="store"
+          title={!stores.length ? "ຍັງບໍ່ມີຮ້ານ" : filter === "attention" && !query.trim() ? "ບໍ່ມີຮ້ານທີ່ຕ້ອງຈັດການ" : "ບໍ່ພົບຮ້ານທີ່ກົງກັນ"}
+          description={!stores.length ? "ເພີ່ມຮ້ານ ແລະຜູກຕູ້ແຊ່ ເພື່ອເລີ່ມຈັດການສິນຄ້າ." : filter === "attention" && !query.trim() ? "ເບິ່ງຮ້ານທັງໝົດໄດ້ ເພື່ອກວດລາຍລະອຽດ." : "ລອງປ່ຽນຄຳຄົ້ນຫາ ຫຼືຕົວກອງ."}
+          action={stores.length ? <button type="button" className="button button-secondary" onClick={() => { setQuery(""); setFilter("all"); }}>ເບິ່ງຮ້ານທັງໝົດ</button> : canManage ? <Link href="/stores/new" className="button button-primary">+ ເພີ່ມຮ້ານ</Link> : undefined}
+        />
       )}
     </section>
   );

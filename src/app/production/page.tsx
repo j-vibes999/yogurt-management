@@ -36,12 +36,11 @@ export default async function ProductionPage({ searchParams }: { searchParams: P
 
         {source === "demo" && <div className="notice" style={{ marginBottom: 16 }}><strong>ໂໝດສາທິດ</strong><br />ການສ້າງ ລັອດການຜະລິດ ແລະຫັກວັດຖຸດິບຈິງຈະເປີດເມື່ອ PostgreSQL ເຮັດວຽກ.</div>}
 
-        <div className="workflow-primary-v1"><div className="panel-kicker" style={{marginBottom:8}}>ຜະລິດມື້ນີ້</div><ProductionPlanner enabled={source === "database"} materialStocks={materialStocks.map((item) => ({ id:item.id,name: item.name, stock: Number(item.currentStock), unit: item.unit, avgCostPerUnit: Number(item.avgCostPerUnit) }))} recipes={plannerRecipes} /></div>
+        <section aria-label="ວາງແຜນການຜະລິດ"><ProductionPlanner enabled={source === "database"} materialStocks={materialStocks.map((item) => ({ id:item.id,name: item.name, stock: Number(item.currentStock), unit: item.unit, avgCostPerUnit: Number(item.avgCostPerUnit) }))} recipes={plannerRecipes} /></section>
 
-        <details className="responsive-disclosure-v33">
-          <summary><span><strong>ຂອງເສຍ / ໝົດອາຍຸ</strong><small>ຫັກສິນຄ້າທີ່ເສຍຫາຍ ຫຼືໝົດອາຍຸຈາກສາງກາງ</small></span></summary>
-          <div className="responsive-disclosure-content-v33"><WasteForm enabled={source === "database"} batches={adjustmentBatches.map(batch => ({ id: batch.id, label: `${batch.batchNumber} · ${batch.productName}`, remaining: batch.quantityRemaining }))}/></div>
-        </details>
+        <ResponsiveDisclosure title="ຂອງເສຍ / ໝົດອາຍຸ" summary="ຫັກສິນຄ້າທີ່ເສຍຫາຍ ຫຼືໝົດອາຍຸຈາກສາງກາງ">
+          <WasteForm enabled={source === "database"} batches={adjustmentBatches.map(batch => ({ id: batch.id, label: `${batch.batchNumber} · ${batch.productName}`, remaining: batch.quantityRemaining }))}/>
+        </ResponsiveDisclosure>
 
         <ResponsiveDisclosure title={historyPage ? "ປະຫວັດລັອດຜະລິດ" : "ລັອດທີ່ມີສິນຄ້າຄົງເຫຼືອ"} summary={historyPage ? `${totalBatches} ລັອດ · ໜ້າ ${historyPage}/${pageCount}` : `${activeBatches.length} ລັອດ · ${centralStockTotal} ຖ້ວຍທີ່ຍັງບໍ່ໝົດອາຍຸ`} className="production-history-disclosure-v33">
           <div className="card panel-card production-batch-card-v4 color-panel">

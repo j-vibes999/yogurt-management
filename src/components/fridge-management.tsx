@@ -29,10 +29,22 @@ export function FridgeManager({ fridge, stores, enabled }: { fridge: Fridge; sto
   const [selectedStatus,setSelectedStatus]=useState<"active"|"maintenance">(fridge.status);
   const dialogRef = useRef<HTMLFormElement>(null);
   const firstFieldRef = useRef<HTMLInputElement>(null);
+  const openerRef = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
 
   const close = useCallback(() => { if(!busy){ setOpen(false); setError(null); setSuccess(null); } }, [busy]);
 
   useModalScrollLock(open);
+  useEffect(() => {
+    const previouslyOpen = wasOpen.current;
+    wasOpen.current = open;
+    if (!previouslyOpen || open) return;
+    // Restore after the scroll-lock cleanup has blurred the dialog's active field.
+    const frame = requestAnimationFrame(() => {
+      if (openerRef.current?.isConnected) focusWithoutScroll(openerRef.current);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
   useEffect(()=>{
     if(!open) return;
     const timer=window.setTimeout(()=>focusWithoutScroll(firstFieldRef.current),30);
@@ -78,7 +90,7 @@ export function FridgeManager({ fridge, stores, enabled }: { fridge: Fridge; sto
   const blockedByStock = fridge.stockTotal > 0 && (moving || maintenanceChange);
 
   return <div className="fridge-manager-v6">
-    <button type="button" className="button button-ghost" onClick={() => {setSelectedStore(fridge.storeId??"");setSelectedStatus(fridge.status);setOpen(true);}}>
+    <button ref={openerRef} type="button" className="button button-ghost" onClick={() => {setSelectedStore(fridge.storeId??"");setSelectedStatus(fridge.status);setOpen(true);}}>
       ຈັດການ
     </button>
     {open && <div className="fridge-modal-backdrop-v6" role="presentation" onMouseDown={(e)=>{if(e.target===e.currentTarget)close();}}>

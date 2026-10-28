@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { formatMoney } from "@/lib/business";
+import { canRoleOpen } from "@/lib/access-policy";
+import { getCurrentSession } from "@/lib/server-session";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -10,7 +12,7 @@ export const revalidate = 0;
 export default async function StoreHubPage({ params }: { params: Promise<{ id: string }> }) {
   noStore();
   const { id } = await params;
-  const store = await prisma.store.findUnique({
+  const [store, session] = await Promise.all([prisma.store.findUnique({
     where: { id },
     include: {
       fridge: true,
@@ -20,8 +22,11 @@ export default async function StoreHubPage({ params }: { params: Promise<{ id: s
       restockVisits: { where: { status: "completed" }, orderBy: { visitDate: "desc" }, take: 6 },
       expenses: { where: { voidedAt: null }, orderBy: { incurredAt: "desc" }, take: 5 },
     },
-  });
+  }), getCurrentSession()]);
   if (!store || !store.isActive) notFound();
+  const can = (href: string) => canRoleOpen(session?.role, href);
+  const canAudit = Boolean(store.fridge) && can(`/driver/restock/${store.id}`);
+  const canRefill = Boolean(store.fridge) && can("/refills/new");
 
   const latestSettlement = store.settlements[0];
   const outstanding = Number(latestSettlement?.closingBalance ?? 0);
@@ -42,12 +47,14 @@ export default async function StoreHubPage({ params }: { params: Promise<{ id: s
         <div className="store-hub-contact-v1"><span>{store.contactName || "—"}</span><span>{store.phone || "—"}</span>{store.fridge && <span>{store.fridge.assetCode}</span>}</div>
       </div>
       <div className="store-hub-actions-v1">
-        <Link className="button button-primary" href={`/driver/restock/${store.id}`}>ກວດຮ້ານ</Link>
-        {outstanding > 0 && <Link className="button button-secondary" href={`/driver/restock/${store.id}?mode=payment`}>ຮັບເງິນ {outstanding.toLocaleString()} LAK</Link>}
-        <Link className="button button-secondary" href={`/refills/new?storeId=${store.id}`}>+ ສ້າງຄຳຂໍເຕີມສິນຄ້າ</Link>
-        <Link className="button button-ghost" href={`/stores/${store.id}/edit`}>ແກ້ໄຂຮ້ານ</Link>
+        {canAudit && <Link className="button button-primary" href={`/driver/restock/${store.id}`}>ກວດຮ້ານ</Link>}
+        {canAudit && outstanding > 0 && <Link className="button button-secondary" href={`/driver/restock/${store.id}?mode=payment`}>ຮັບເງິນ {outstanding.toLocaleString()} LAK</Link>}
+        {canRefill && <Link className="button button-secondary" href={`/refills/new?storeId=${encodeURIComponent(store.id)}`}>+ ສ້າງຄຳຂໍເຕີມສິນຄ້າ</Link>}
+        {can(`/stores/${store.id}/edit`) && <Link className="button button-ghost" href={`/stores/${store.id}/edit`}>ແກ້ໄຂຮ້ານ</Link>}
       </div>
     </section>
+
+    {!store.fridge && <div className="notice form-mode-notice"><strong>ຮ້ານນີ້ຍັງບໍ່ຜູກຕູ້ແຊ່</strong><p>ໃຫ້ຜູ້ຈັດການຜູກຕູ້ແຊ່ ກ່ອນກວດຮ້ານ ຫຼືສ້າງຄຳຂໍເຕີມສິນຄ້າ.</p>{can("/fridges") && <Link className="text-link" href="/fridges">ຈັດການຕູ້ແຊ່ →</Link>}</div>}
 
     <section className="store-hub-kpis-v1">
       <article className={`card ${outstanding > 0 ? "color-metric-warning" : "color-metric-success"}`}><span>ຍອດຄ້າງ</span><strong>{formatMoney(outstanding)}</strong><small>{moneyStatus}</small></article>
@@ -58,17 +65,17 @@ export default async function StoreHubPage({ params }: { params: Promise<{ id: s
 
     <div className="store-hub-grid-v1">
       <section className="card panel-card color-panel">
-        <div className="panel-head color-panel-heading"><div><span className="panel-kicker">ສິນຄ້າຄົງເຫຼືອ</span><h2>ສິນຄ້າຢູ່ໃນຕູ້</h2></div><Link className="text-link" href={`/driver/restock/${store.id}`}>ກວດຈຳນວນຄົງເຫຼືອ →</Link></div>
+        <div className="panel-head color-panel-heading"><div><span className="panel-kicker">ສິນຄ້າຄົງເຫຼືອ</span><h2>ສິນຄ້າຢູ່ໃນຕູ້</h2></div>{canAudit && <Link className="text-link" href={`/driver/restock/${store.id}`}>ກວດຈຳນວນຄົງເຫຼືອ →</Link>}</div>
         <div className="store-hub-stock-list-v1">{store.fridgeInventory.length ? store.fridgeInventory.map(row => <div key={row.id}><span><strong>{row.finishedProduct.name}</strong><small>{row.finishedProduct.code}</small></span><b>{row.currentStock} ຖ້ວຍ</b></div>) : <div className="empty-state compact-empty"><strong>ຍັງບໍ່ມີສິນຄ້າໃນຕູ້</strong></div>}</div>
       </section>
 
       <section className="card panel-card color-panel color-domain-finance">
-        <div className="panel-head color-panel-heading"><div><span className="panel-kicker">ການເງິນ</span><h2>ຍອດຊຳລະຫຼ້າສຸດ</h2></div><Link className="text-link" href="/settlements">ເບິ່ງທັງໝົດ →</Link></div>
+        <div className="panel-head color-panel-heading"><div><span className="panel-kicker">ການເງິນ</span><h2>ຍອດຊຳລະຫຼ້າສຸດ</h2></div>{can("/settlements") && <Link className="text-link" href="/settlements">ເບິ່ງທັງໝົດ →</Link>}</div>
         <div className="store-hub-money-v1"><div><span>ຍອດຄ້າງຫຼ້າສຸດ</span><strong className={outstanding > 0 ? "warning-text" : "success-text"}>{formatMoney(outstanding)}</strong></div>{latestSettlement && <><div><span>ຮັບແລ້ວຮອບຫຼ້າສຸດ</span><strong>{formatMoney(Number(latestSettlement.paidAmount))}</strong></div><div><span>ວັນທີ</span><strong>{new Intl.DateTimeFormat("lo-LA", { dateStyle: "medium" }).format(latestSettlement.settlementDate)}</strong></div></>}</div>
       </section>
 
       <section className="card panel-card color-panel color-domain-refills">
-        <div className="panel-head color-panel-heading"><div><span className="panel-kicker">ເຕີມສິນຄ້າ</span><h2>ຄິວເຕີມສິນຄ້າ</h2></div><Link className="text-link" href={`/refills/new?storeId=${store.id}`}>+ ສ້າງຄຳຂໍເຕີມສິນຄ້າ</Link></div>
+        <div className="panel-head color-panel-heading"><div><span className="panel-kicker">ເຕີມສິນຄ້າ</span><h2>ຄິວເຕີມສິນຄ້າ</h2></div>{canRefill && <Link className="text-link" href={`/refills/new?storeId=${encodeURIComponent(store.id)}`}>+ ສ້າງຄຳຂໍເຕີມສິນຄ້າ</Link>}</div>
         {store.refillRequests.length ? <div className="store-hub-refill-v1">{store.refillRequests.map(req => <div key={req.id}><span><strong>{req.status === "waiting" ? "ລໍຖ້າ" : req.status === "preparing" ? "ກຳລັງຈັດ" : "ກຳລັງສົ່ງ"}</strong><small>{req.items.map(x => `${x.finishedProduct.name} ${x.quantity}`).join(" · ")}</small></span><b>{req.items.reduce((s,x)=>s+x.quantity,0)} ຖ້ວຍ</b></div>)}</div> : <div className="empty-state compact-empty"><strong>ບໍ່ມີຄຳຂໍເຕີມສິນຄ້າຄ້າງ</strong><span>ຕອນນີ້ບໍ່ມີຄຳຂໍທີ່ຕ້ອງຈັດການ</span></div>}
       </section>
 

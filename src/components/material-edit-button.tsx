@@ -41,8 +41,8 @@ export function MaterialEditButton({material}:{material:MaterialEditable}){
  return <>
   <button type="button" className="button button-ghost material-edit-trigger-v1" onClick={show}>ຈັດການ</button>
   <Dialog.Root open={open} onOpenChange={(next)=>{if(!isSubmitting)setOpen(next)}}><Dialog.Portal>
-   <Dialog.Overlay className="modal-backdrop" />
-   <div className="material-dialog-positioner-v43"><Dialog.Content className="card material-edit-modal-v1 stock-adjust-modal-v16 material-simple-edit-v18" onEscapeKeyDown={e=>{if(isSubmitting)e.preventDefault()}} onPointerDownOutside={e=>{if(isSubmitting)e.preventDefault()}}>
+   <Dialog.Overlay className="material-dialog-overlay" />
+   <div className="material-dialog-positioner"><Dialog.Content className="card material-edit-modal-v1 stock-adjust-modal-v16 material-simple-edit-v18 material-dialog-content" onEscapeKeyDown={e=>{if(isSubmitting)e.preventDefault()}} onPointerDownOutside={e=>{if(isSubmitting)e.preventDefault()}}>
     <div className="panel-head"><div><span className="panel-kicker">ວັດຖຸດິບ</span><Dialog.Title asChild><h2>{material.name}</h2></Dialog.Title><Dialog.Description asChild><p>ແກ້ຈຳນວນຄົງເຫຼືອ ແລະລາຄາໄດ້ໃນໜ້າດຽວ</p></Dialog.Description></div><Dialog.Close asChild><button type="button" className="modal-close" disabled={isSubmitting} aria-label="ປິດ"><X size={18} aria-hidden="true"/></button></Dialog.Close></div>
     <form onSubmit={save} noValidate>
      <div className="material-simple-grid-v18"><label className="field"><span>ຈຳນວນຄົງເຫຼືອ ({snapshot.unit})</span><input data-dialog-autofocus className="form-control material-simple-input-v18" {...register("stock",{valueAsNumber:true})} aria-invalid={!!errors.stock} inputMode="decimal" type="number" min="0" step="0.000001"/><small>ຕອນເປີດ {cleanNumber(snapshot.stock)} {snapshot.unit}</small>{errors.stock&&<small className="field-error" role="alert">{errors.stock.message}</small>}</label>

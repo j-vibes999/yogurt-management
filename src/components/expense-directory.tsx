@@ -18,6 +18,9 @@ type ServerList={page:number;pageCount:number;total:number;query:string;filter:s
 function listHref(query:string,filter:string,page:number){const params=new URLSearchParams({filter,page:String(page)});if(query.trim())params.set("q",query.trim());return `/expenses?${params}`}
 export function ExpenseDirectory({expenses,stores,enabled,server}:{expenses:E[];stores:StoreOption[];enabled:boolean;server?:ServerList}){
  const router=useRouter();const[pending,startTransition]=useTransition();const previousQuery=useRef(server?.query??"");const serverQuery=server?.query,serverFilter=server?.filter;
+ const editTrigger=useRef<HTMLButtonElement|null>(null);const editingBusyRef=useRef(false);const[editingBusy,setEditingBusy]=useState(false);
+ function updateEditingBusy(value:boolean){editingBusyRef.current=value;setEditingBusy(value)}
+ function closeEditor(){if(!editingBusyRef.current)setEditing(null)}
  const[q,setQ]=useState(server?.query??"");const[f,setF]=usePersistedFilter("yogu:filter:expenses","all",["all","month","electricity","transport","maintenance"] as const);const[editing,setEditing]=useState<E|null>(null);const[sorting,setSorting]=useState<SortingState>([{id:"incurredAtIso",desc:true}]);
  const filter=serverFilter??f;
  useEffect(()=>{if(serverQuery===undefined)return;const previous=previousQuery.current;previousQuery.current=serverQuery;setQ(current=>current===previous?serverQuery:current)},[serverQuery]);
@@ -32,7 +35,7 @@ export function ExpenseDirectory({expenses,stores,enabled,server}:{expenses:E[];
   {accessorKey:"storeName",header:"ຮ້ານ",cell:({getValue})=>getValue<string|null>()??"ລວມທຸລະກິດ"},
   {accessorKey:"amount",header:"ຈຳນວນ",cell:({getValue})=><strong>{getValue<number>().toLocaleString()} LAK</strong>},
   {accessorKey:"receiptUrl",header:"ຫຼັກຖານ",enableSorting:false,cell:({getValue})=>{const url=getValue<string|null>();return url?<a className="button button-ghost" href={url} target="_blank" rel="noreferrer"><Paperclip size={15} aria-hidden="true"/> ເບິ່ງ</a>:"—"}},
-  {id:"actions",header:"",enableSorting:false,cell:({row})=><div className="table-actions-v4"><button className="button button-ghost" type="button" onClick={()=>setEditing(row.original)}>ແກ້ໄຂ</button><ExpenseVoidButton id={row.original.id} enabled={enabled}/></div>},
+  {id:"actions",header:"",enableSorting:false,cell:({row})=><div className="table-actions-v4"><button className="button button-ghost" type="button" onClick={event=>{editTrigger.current=event.currentTarget;setEditing(row.original)}}>ແກ້ໄຂ</button><ExpenseVoidButton id={row.original.id} enabled={enabled}/></div>},
  ],[enabled]);
  const table=useReactTable({data:rows,columns,state:{sorting},onSortingChange:setSorting,defaultColumn:{enableSorting:!server},manualSorting:Boolean(server),getCoreRowModel:getCoreRowModel(),getSortedRowModel:getSortedRowModel()});
  const editExpense:EditableExpense|null=editing?{id:editing.id,category:editing.category,amount:editing.amount,incurredAt:businessDateString(new Date(editing.incurredAtIso)),storeId:editing.storeId,storeName:editing.storeName,note:editing.note,receiptUrl:editing.receiptUrl}:null;
@@ -44,12 +47,16 @@ export function ExpenseDirectory({expenses,stores,enabled,server}:{expenses:E[];
   <span>ໜ້າ {server.page}/{server.pageCount}</span>
   {server.page<server.pageCount&&<Link className="button button-secondary" href={listHref(server.query,server.filter,server.page+1)}>ຖັດໄປ</Link>}
  </nav>}
- <Dialog.Root open={Boolean(editing)} onOpenChange={next=>{if(!next)setEditing(null)}}>
+ <Dialog.Root open={Boolean(editing)} onOpenChange={next=>{if(!next)closeEditor()}}>
   {editing&&editExpense&&(
    <Dialog.Portal>
     <Dialog.Overlay className="expense-edit-backdrop-v22"/>
     <Dialog.Content
      className="expense-edit-modal-v22 workspace-color-page color-domain-finance color-panel"
+     aria-describedby={undefined}
+     onEscapeKeyDown={event=>{if(editingBusyRef.current)event.preventDefault()}}
+     onPointerDownOutside={event=>{if(editingBusyRef.current)event.preventDefault()}}
+     onCloseAutoFocus={event=>{event.preventDefault();requestAnimationFrame(()=>editTrigger.current?.focus({preventScroll:true}))}}
      onOpenAutoFocus={(event)=>{
       event.preventDefault();
       requestAnimationFrame(()=>document.querySelector<HTMLElement>('[data-expense-edit-autofocus]')?.focus({preventScroll:true}));
@@ -57,9 +64,9 @@ export function ExpenseDirectory({expenses,stores,enabled,server}:{expenses:E[];
     >
      <div className="expense-edit-modal-head-v22 color-panel-heading">
       <div><span className="panel-kicker">ລາຍຈ່າຍ</span><Dialog.Title asChild><h2>ແກ້ໄຂລາຍຈ່າຍ</h2></Dialog.Title></div>
-      <Dialog.Close asChild><button type="button" className="modal-close" aria-label="ປິດ"><X size={18} aria-hidden="true"/></button></Dialog.Close>
+      <Dialog.Close asChild disabled={editingBusy}><button type="button" className="modal-close" aria-label="ປິດ" disabled={editingBusy}><X size={18} aria-hidden="true"/></button></Dialog.Close>
      </div>
-     <ExpenseEditForm expense={editExpense} stores={stores} enabled={enabled} modal onCancel={()=>setEditing(null)} onSaved={()=>setEditing(null)}/>
+     <ExpenseEditForm expense={editExpense} stores={stores} enabled={enabled} modal onCancel={closeEditor} onSaved={()=>setEditing(null)} onBusyChange={updateEditingBusy}/>
     </Dialog.Content>
    </Dialog.Portal>
   )}

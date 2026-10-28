@@ -8,6 +8,7 @@ import { showToast } from "@/lib/toast";
 import { InlineFeedback } from "@/components/inline-feedback";
 import { invalidateShell } from "@/lib/operation-request";
 import { parseMoneyCents } from "@/lib/money";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 export type EditableStore = {
   id: string;
@@ -71,6 +72,8 @@ export function StoreEditForm({ store, enabled }: { store: EditableStore; enable
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const { allowNavigation, navigationDialog } = useUnsavedChanges(dirty);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -91,6 +94,8 @@ export function StoreEditForm({ store, enabled }: { store: EditableStore; enable
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "ບໍ່ສາມາດບັນທຶກຮ້ານໄດ້");
       showToast({ tone: "success", title: "ບັນທຶກການແກ້ໄຂຮ້ານແລ້ວ", message: store.name });
+      setDirty(false);
+      allowNavigation();
       router.push("/stores");
       invalidateShell();
       router.refresh();
@@ -102,7 +107,8 @@ export function StoreEditForm({ store, enabled }: { store: EditableStore; enable
   }
 
   return (
-    <form className="card form-card color-panel" onSubmit={submit}>
+    <form className="card form-card color-panel" onSubmit={submit} onChangeCapture={() => setDirty(true)}>
+      {navigationDialog}
       <div className="form-section">
         <div className="color-panel-heading"><span className="panel-kicker">ຂໍ້ມູນຮ້ານ</span><h2>ແກ້ໄຂຂໍ້ມູນຮ້ານ</h2></div>
         <div className="form-grid form-grid-2">

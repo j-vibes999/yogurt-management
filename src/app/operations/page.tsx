@@ -63,11 +63,11 @@ export default async function OperationsPage(){
       </div>
     </header>
 
-    <main className="operations-workspace-v43 color-panel" id="master-data">
+    <section className="operations-workspace-v43 color-panel" id="master-data" aria-labelledby="master-data-title">
       <div className="operations-workspace-head-v43 color-panel-heading">
         <div>
           <span className="panel-kicker">ວຽກຫຼັກ</span>
-          <h2>ຂໍ້ມູນຫຼັກ</h2>
+          <h2 id="master-data-title">ຂໍ້ມູນຫຼັກ</h2>
           <p>ເລືອກໝວດຂໍ້ມູນທີ່ຕ້ອງການຈັດການ.</p>
         </div>
         <div className="operations-workspace-counts-v43" aria-label="ສະຫຼຸບຂໍ້ມູນຫຼັກ">
@@ -81,7 +81,7 @@ export default async function OperationsPage(){
         {key:"materials",label:"ວັດຖຸດິບ",content:<MasterDataManagement {...masterProps} view="materials"/>},
         {key:"recipes",label:"ສູດການຜະລິດ",content:<RecipeManager {...recipeProps}/>},
       ]}/>
-    </main>
+    </section>
 
     <ResponsiveDisclosure title="ປິດຍອດປະຈຳວັນ" summary="ບັນທຶກເງິນສົດ, ເງິນໂອນ ແລະລາຍຈ່າຍ" className="color-domain-finance">
       <ClosingForm/>

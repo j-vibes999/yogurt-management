@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { showToast } from "@/lib/toast";
 import { operationFetch } from "@/lib/operation-request";
 import { businessDateString } from "@/lib/date-only";
@@ -102,25 +102,41 @@ export function StoreCreateForm({ enabled }: { enabled: boolean }) {
   );
 }
 
-export function RefillCreateForm({ stores, products, enabled }: { stores: StoreOption[]; products: { id:string; name:string; code:string }[]; enabled: boolean }) {
+export function RefillCreateForm({ stores, products, enabled, initialStoreId = "", storeSelectionNotice }: { stores: StoreOption[]; products: { id:string; name:string; code:string }[]; enabled: boolean; initialStoreId?: string; storeSelectionNotice?: string }) {
   const { busy, error, submit, markDirty, navigationDialog } = useSubmit("/api/refills", "/refills");
+  const storeNoticeId = useId();
+  const quantityErrorId = useId();
+  const quantityInputRef = useRef<HTMLInputElement>(null);
+  const [quantityError, setQuantityError] = useState<string | null>(null);
+  const [showStoreNotice, setShowStoreNotice] = useState(Boolean(storeSelectionNotice));
+  const selectedStoreId = stores.some((store) => store.id === initialStoreId) ? initialStoreId : "";
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
+    if (!enabled || busy || !stores.length || !products.length) return;
     const items = products.map((product) => ({ finishedProductId: product.id, quantity: Number(form.get(`product_${product.id}`) || 0) })).filter((item) => item.quantity > 0);
+    if (!items.length) {
+      setQuantityError("ກະລຸນາໃສ່ຈຳນວນສິນຄ້າຢ່າງໜ້ອຍ 1 ຖ້ວຍ ໃນ 1 ລາຍການ.");
+      quantityInputRef.current?.focus();
+      return;
+    }
+    setQuantityError(null);
     await submit({ storeId: form.get("storeId"), note: form.get("note"), items });
   }
   return (
     <form className="card form-card color-panel" onSubmit={onSubmit} onChangeCapture={markDirty}>
       {navigationDialog}
       <div className="form-section"><div className="color-panel-heading"><span className="panel-kicker">ຄຳຂໍເຕີມສິນຄ້າ</span><h2>ສ້າງຄຳຂໍເຕີມສິນຄ້າ</h2></div>
+        {!stores.length && <div className="notice form-mode-notice"><strong>ຍັງບໍ່ມີຮ້ານທີ່ພ້ອມເຕີມສິນຄ້າ</strong><p>ໃຫ້ຜູ້ຈັດການເພີ່ມຮ້ານ ແລະຜູກຕູ້ແຊ່ກ່ອນ.</p><Link href="/stores" className="text-link">ເບິ່ງຮ້ານຄ້າ →</Link></div>}
+        {!products.length && <div className="notice form-mode-notice"><strong>ຍັງບໍ່ມີສິນຄ້າໃຫ້ເລືອກ</strong><p>ໃຫ້ຜູ້ຈັດການເປີດໃຊ້ສິນຄ້າ ກ່ອນສ້າງຄຳຂໍເຕີມສິນຄ້າ.</p></div>}
         <div className="form-grid form-grid-2">
-          <label className="field form-span-2"><span>ຮ້ານ *</span><select className="form-control" name="storeId" required defaultValue=""><option value="" disabled>ເລືອກຮ້ານ</option>{stores.map((store) => <option value={store.id} key={store.id}>{store.name}</option>)}</select></label>
-          {products.map((product) => <label className="field" key={product.id}><span>{product.name} (ຖ້ວຍ)</span><input className="form-control" name={`product_${product.id}`} type="number" min="0" step="1" defaultValue="0" /></label>)}
+          <label className="field form-span-2"><span>ຮ້ານ *</span><select className="form-control" name="storeId" required defaultValue={selectedStoreId} disabled={!stores.length} aria-describedby={showStoreNotice ? storeNoticeId : undefined} onChange={() => setShowStoreNotice(false)}><option value="" disabled>ເລືອກຮ້ານ</option>{stores.map((store) => <option value={store.id} key={store.id}>{store.name}</option>)}</select>{showStoreNotice && <small id={storeNoticeId} className="warning-text" role="status">{storeSelectionNotice}</small>}</label>
+          {products.map((product, index) => <label className="field" key={product.id}><span>{product.name} (ຖ້ວຍ)</span><input ref={index === 0 ? quantityInputRef : undefined} className="form-control" name={`product_${product.id}`} type="number" min="0" max="100000" step="1" defaultValue="0" aria-invalid={Boolean(quantityError)} aria-describedby={quantityError ? quantityErrorId : undefined} onChange={() => setQuantityError(null)} /></label>)}
+          {quantityError && <small id={quantityErrorId} className="field-error form-span-2" role="alert">{quantityError}</small>}
           <label className="field form-span-2"><span>ໝາຍເຫດ</span><textarea className="form-control form-textarea" name="note" rows={3} placeholder="ເຊັ່ນ ຮ້ານໂທແຈ້ງວ່າສິນຄ້າໃກ້ໝົດ" /></label>
         </div>
       </div>
       <ErrorNotice error={error} />
-      <div className="form-actions"><Link href="/refills" className="button button-secondary">ຍົກເລີກ</Link><button className="button button-primary" disabled={!enabled || busy || !products.length}>{busy ? "ກຳລັງບັນທຶກ..." : enabled ? "ສ້າງຄຳຂໍ" : "ຕ້ອງເຊື່ອມຕໍ່ຖານຂໍ້ມູນ"}</button></div>
+      <div className="form-actions"><Link href="/refills" className="button button-secondary">ຍົກເລີກ</Link><button className="button button-primary" aria-busy={busy} disabled={!enabled || busy || !products.length || !stores.length}>{busy ? "ກຳລັງບັນທຶກ..." : enabled ? "ສ້າງຄຳຂໍ" : "ຕ້ອງເຊື່ອມຕໍ່ຖານຂໍ້ມູນ"}</button></div>
     </form>
   );
 }

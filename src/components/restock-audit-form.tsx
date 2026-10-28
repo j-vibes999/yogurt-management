@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -33,6 +33,7 @@ type Props = {
 };
 
 export function RestockAuditForm({ store, fridge, lines, previousBalance, paymentFirst=false }: Props) {
+  const countsId=useId();
   const [userId,setUserId]=useState<string|null>(null);
   const {draft:storageKey,payment:paymentStorageKey,visit:visitStorageKey}=financialStorageKeys(userId??"",store.id);
   const [storageNotice,setStorageNotice]=useState<string|null>(null);
@@ -232,7 +233,40 @@ export function RestockAuditForm({ store, fridge, lines, previousBalance, paymen
         {!paymentFirst&&pendingVisit&&<div className="notice" role="status">ມີຄຳຂໍປິດຮອບທີ່ຮັບເງິນ {formatMoney(pendingVisit.paidAmount)} ແລະຍັງບໍ່ຮູ້ຜົນ. ກົດປຸ່ມດ້ານລຸ່ມເພື່ອກວດຄຳຂໍເກົ່າກ່ອນ.</div>}
         {(paymentFirst||step===1)&&<>
           <div className="restock-mini-summary-v7"><div className="color-metric-domain"><span>ຂາຍໄດ້</span><strong>{unitsSold} ຖ້ວຍ</strong></div><div className={expiredUnits>0?'color-metric-warning':'color-metric-neutral'}><span>ເສຍ / ໝົດອາຍຸ</span><strong>{expiredUnits}</strong></div><div className="color-metric-domain color-domain-finance"><span>ຍອດຂາຍລວມ</span><strong>{formatMoney(settlement.grossAmount)}</strong></div></div>
-        {results.map(line=><section className="card audit-card" key={line.productId}><div className="audit-product"><span className="product-dot" style={{background:line.color}}/><div style={{flex:1}}><strong>{line.name}</strong><div className="store-meta">{formatMoney(line.retailPrice)} / ຖ້ວຍ</div></div></div><div className="audit-grid"><div className="field"><label>ຈຳນວນກ່ອນນັບ</label><div className="readonly-box">{line.previousStock}</div></div><div className="field"><label>ຄົງເຫຼືອຈິງ</label><div className="audit-stepper-wrap-v1"><button type="button" className="stepper-btn-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countRemaining',-1)} aria-label="ຫຼຸດ 1">-1</button><input className="number-input stepper-input-v1" aria-label={`${line.name} ຄົງເຫຼືອຈິງ`} min={0} type="number" disabled={!draftReady} value={entries[line.productId].countRemaining} onChange={e=>update(line.productId,'countRemaining',e.target.value)}/><button type="button" className="stepper-btn-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countRemaining',1)} aria-label="ເພີ່ມ 1">+1</button><button type="button" className="stepper-btn-v1 stepper-btn-jump-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countRemaining',5)} aria-label="ເພີ່ມ 5">+5</button></div></div><div className="field"><label>ເສຍ / ໝົດອາຍຸ</label><div className="audit-stepper-wrap-v1"><button type="button" className="stepper-btn-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countExpiredReturned',-1)} aria-label="ຫຼຸດ 1">-1</button><input className="number-input stepper-input-v1" aria-label={`${line.name} ເສຍ ຫຼື ໝົດອາຍຸ`} min={0} type="number" disabled={!draftReady} value={entries[line.productId].countExpiredReturned} onChange={e=>update(line.productId,'countExpiredReturned',e.target.value)}/><button type="button" className="stepper-btn-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countExpiredReturned',1)} aria-label="ເພີ່ມ 1">+1</button></div></div><div className="field"><label>ຈຳນວນເຕີມໃນຮອບ</label><div className="readonly-box">{entries[line.productId].countRefilled}</div></div></div><div className={`audit-result ${line.hasNegativeSale?'warning':''}`}><div><div className="kicker">ຂາຍ</div><strong>{line.unitsSold} ຖ້ວຍ</strong></div><div style={{textAlign:'right'}}><div className="kicker">ຍອດ</div><strong>{formatMoney(line.subtotalGross)}</strong></div></div>{line.hasNegativeSale&&<p className="danger-text">ຈຳນວນຂາຍຕິດລົບ — ກວດຈຳນວນອີກຄັ້ງ.</p>}</section>)}
+        {results.map(line=>{
+          const remainingInvalid=parseWholeCount(entries[line.productId].countRemaining)===null;
+          const expiredInvalid=parseWholeCount(entries[line.productId].countExpiredReturned)===null;
+          const remainingId=`${countsId}-${line.productId}-remaining`;
+          const expiredId=`${countsId}-${line.productId}-expired`;
+          return <section className="card audit-card" key={line.productId}>
+            <div className="audit-product"><span className="product-dot" style={{background:line.color}}/><div style={{flex:1}}><strong>{line.name}</strong><div className="store-meta">{formatMoney(line.retailPrice)} / ຖ້ວຍ</div></div></div>
+            <div className="audit-grid">
+              <div className="field"><span>ຈຳນວນກ່ອນນັບ</span><div className="readonly-box">{line.previousStock}</div></div>
+              <div className="field">
+                <label htmlFor={remainingId}>ຄົງເຫຼືອຈິງ</label>
+                <div className="audit-stepper-wrap-v1">
+                  <button type="button" className="stepper-btn-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countRemaining',-1)} aria-label="ຫຼຸດ 1">-1</button>
+                  <input id={remainingId} className="number-input stepper-input-v1" aria-label={`${line.name} ຄົງເຫຼືອຈິງ`} aria-invalid={remainingInvalid} aria-describedby={remainingInvalid?`${remainingId}-error`:undefined} min={0} step={1} inputMode="numeric" type="number" disabled={!draftReady} value={entries[line.productId].countRemaining} onChange={e=>update(line.productId,'countRemaining',e.target.value)}/>
+                  <button type="button" className="stepper-btn-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countRemaining',1)} aria-label="ເພີ່ມ 1">+1</button>
+                  <button type="button" className="stepper-btn-v1 stepper-btn-jump-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countRemaining',5)} aria-label="ເພີ່ມ 5">+5</button>
+                </div>
+                {remainingInvalid&&<small id={`${remainingId}-error`} className="field-error" role="alert">ໃສ່ຈຳນວນເຕັມ 0 ຫຼືຫຼາຍກວ່າ.</small>}
+              </div>
+              <div className="field">
+                <label htmlFor={expiredId}>ເສຍ / ໝົດອາຍຸ</label>
+                <div className="audit-stepper-wrap-v1">
+                  <button type="button" className="stepper-btn-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countExpiredReturned',-1)} aria-label="ຫຼຸດ 1">-1</button>
+                  <input id={expiredId} className="number-input stepper-input-v1" aria-label={`${line.name} ເສຍ ຫຼື ໝົດອາຍຸ`} aria-invalid={expiredInvalid} aria-describedby={expiredInvalid?`${expiredId}-error`:undefined} min={0} step={1} inputMode="numeric" type="number" disabled={!draftReady} value={entries[line.productId].countExpiredReturned} onChange={e=>update(line.productId,'countExpiredReturned',e.target.value)}/>
+                  <button type="button" className="stepper-btn-v1" disabled={!draftReady} onClick={()=>adjust(line.productId,'countExpiredReturned',1)} aria-label="ເພີ່ມ 1">+1</button>
+                </div>
+                {expiredInvalid&&<small id={`${expiredId}-error`} className="field-error" role="alert">ໃສ່ຈຳນວນເຕັມ 0 ຫຼືຫຼາຍກວ່າ.</small>}
+              </div>
+              <div className="field"><span>ຈຳນວນເຕີມໃນຮອບ</span><div className="readonly-box">{entries[line.productId].countRefilled}</div></div>
+            </div>
+            <div className={`audit-result ${line.hasNegativeSale?'warning':''}`}><div><div className="kicker">ຂາຍ</div><strong>{line.unitsSold} ຖ້ວຍ</strong></div><div style={{textAlign:'right'}}><div className="kicker">ຍອດ</div><strong>{formatMoney(line.subtotalGross)}</strong></div></div>
+            {line.hasNegativeSale&&<p className="danger-text">ຈຳນວນຂາຍຕິດລົບ — ກວດຈຳນວນອີກຄັ້ງ.</p>}
+          </section>;
+        })}
           {!paymentFirst&&<div className="audit-flow-actions"><button type="button" className="button button-ghost" onClick={saveDraft} disabled={!draftReady}>{saved?'ເກັບສະບັບຮ່າງແລ້ວ ✓':'ເກັບສະບັບຮ່າງ'}</button><button type="button" className="button button-primary" disabled={hasReconciliationError} onClick={()=>goToStep(2)}>ຕໍ່ໄປ: ຮັບເງິນ →</button></div>}
         </>}
         {!paymentFirst&&step===2&&<>

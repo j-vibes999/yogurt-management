@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Search } from "lucide-react";
 import { createSearchRequest, fetchSearchResults, type SearchResult } from "@/lib/search-request";
@@ -8,11 +9,13 @@ import { createSearchRequest, fetchSearchResults, type SearchResult } from "@/li
 type SearchState = { query: string; results: SearchResult[]; status: "idle" | "loading" | "success" | "error"; error?: string };
 
 export function GlobalSearch() {
+  const pathname = usePathname();
   const [q, setQ] = useState("");
   const [state, setState] = useState<SearchState>({ query: "", results: [], status: "idle" });
   const [open, setOpen] = useState(false);
   const [retry, setRetry] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
   const requestGate = useRef(createSearchRequest());
   const query = q.trim();
 
@@ -21,11 +24,31 @@ export function GlobalSearch() {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault(); inputRef.current?.focus(); setOpen(true);
       }
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        if (event.target instanceof Node && searchRef.current?.contains(event.target)) {
+          event.preventDefault();
+          inputRef.current?.focus({ preventScroll: true });
+        }
+        setOpen(false);
+      }
     };
+    const dismissOutside = (event: Event) => {
+      if (event.target instanceof Node && !searchRef.current?.contains(event.target)) setOpen(false);
+    };
+    const dismissOnBlur = () => setOpen(false);
     window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    window.addEventListener("blur", dismissOnBlur);
+    document.addEventListener("pointerdown", dismissOutside);
+    document.addEventListener("focusin", dismissOutside);
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("blur", dismissOnBlur);
+      document.removeEventListener("pointerdown", dismissOutside);
+      document.removeEventListener("focusin", dismissOutside);
+    };
   }, []);
+
+  useEffect(() => { setOpen(false); }, [pathname]);
 
   useEffect(() => {
     const gate = requestGate.current;
@@ -48,7 +71,7 @@ export function GlobalSearch() {
   const loading = query.length >= 2 && (state.query !== query || state.status === "loading");
   const results = state.query === query ? state.results : [];
 
-  return <div className="global-search-v5">
+  return <div className="global-search-v5" ref={searchRef}>
     <span className="global-search-icon-v5"><Search size={16} aria-hidden="true" /></span>
     <input aria-label="ຄົ້ນຫາທົ່ວລະບົບ" aria-controls={open && query.length >= 2 ? "global-search-results" : undefined} autoComplete="off" name="globalSearch" ref={inputRef} value={q} onFocus={() => setOpen(true)} onChange={event => setQ(event.target.value)} placeholder="ຄົ້ນຫາ…" />
     <kbd>⌘ K</kbd>

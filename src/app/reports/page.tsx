@@ -4,6 +4,7 @@ import { formatMoney } from "@/lib/business";
 import { getReportsData } from "@/lib/db-data";
 import { ReportExportButton } from "@/components/report-export-button";
 import { ResponsiveDisclosure } from "@/components/responsive-disclosure";
+import { EmptyState } from "@/components/empty-state";
 import { businessDateString, businessReportRange } from "@/lib/date-only";
 export const dynamic="force-dynamic"; export const revalidate=0;
 
@@ -40,13 +41,13 @@ export default async function ReportsPage({searchParams}:{searchParams?:Promise<
       <section className="reports-detail-grid-v21">
         <article className="card panel-card color-panel">
           <div className="panel-head color-panel-heading"><div><span className="panel-kicker">ຮ້ານ</span><h2>ຍອດຂາຍຕາມຮ້ານ</h2></div></div>
-          <div className="report-simple-list-v21">{ranked.map(row=><div key={row.storeId}><span><strong>{row.storeName}</strong><small>ກຳໄລ {formatMoney(row.profit)} · ລາຍຈ່າຍຈິງ {formatMoney(row.expenseTotal)}{row.wasteCost>0?` · ຂອງເສຍ ${formatMoney(row.wasteCost)}`:""}</small></span><b>{formatMoney(row.gross)}</b></div>)}</div>
+          {ranked.length?<div className="report-simple-list-v21">{ranked.map(row=><div key={row.storeId}><span><strong>{row.storeName}</strong><small>ກຳໄລ {formatMoney(row.profit)} · ລາຍຈ່າຍຈິງ {formatMoney(row.expenseTotal)}{row.wasteCost>0?` · ຂອງເສຍ ${formatMoney(row.wasteCost)}`:""}</small></span><b>{formatMoney(row.gross)}</b></div>)}</div>:<EmptyState compact icon="store" title="ຍັງບໍ່ມີຍອດຂາຍຕາມຮ້ານ" description="ເລືອກໄລຍະເວລາອື່ນ ຫຼືກວດກາລາຍການປິດຮອບຂອງຮ້ານ." action={<Link className="button button-secondary" href="/settlements?filter=all">ເບິ່ງປະຫວັດປິດຮອບ</Link>}/>}
           {data.unallocatedExpenses>0&&<p className="panel-description">ລາຍຈ່າຍສ່ວນກາງ {formatMoney(data.unallocatedExpenses)} ຫັກຈາກກຳໄລລວມ.</p>}
           {data.centralWasteCost>0&&<p className="panel-description">ສິນຄ້າທີ່ຕັດອອກຈາກສາງກາງ (ເສຍ / ໝົດອາຍຸ) {formatMoney(data.centralWasteCost)} ຫັກຈາກກຳໄລລວມ.</p>}
         </article>
         <article className="card panel-card color-panel">
           <div className="panel-head color-panel-heading"><div><span className="panel-kicker">ສິນຄ້າ</span><h2>ຍອດຂາຍຕາມສິນຄ້າ</h2></div><span className="store-meta">{units.toLocaleString()} ຖ້ວຍ</span></div>
-          <div className="report-simple-list-v21">{data.productSales.map(item=><div key={item.productId}><span><strong>{item.name}</strong><small>{units?Math.round(item.unitsSold/units*100):0}% ຂອງຈຳນວນຂາຍ</small></span><b>{item.unitsSold.toLocaleString()}</b></div>)}</div>
+          {data.productSales.length?<div className="report-simple-list-v21">{data.productSales.map(item=><div key={item.productId}><span><strong>{item.name}</strong><small>{units?Math.round(item.unitsSold/units*100):0}% ຂອງຈຳນວນຂາຍ</small></span><b>{item.unitsSold.toLocaleString()}</b></div>)}</div>:<EmptyState compact icon="box" title="ຍັງບໍ່ມີສິນຄ້າຂາຍໃນຊ່ວງນີ້" description="ຍອດຂາຍຈະສະແດງຫຼັງບັນທຶກການກວດຮ້ານ ແລະປິດຮອບ. ລອງເລືອກໄລຍະເວລາອື່ນໄດ້."/>}
         </article>
       </section>
       <article className="card panel-card color-panel report-cost-simple-v21">

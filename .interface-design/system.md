@@ -16,3 +16,5 @@ Authority: PRODUCT.md defines operations/business intent; DESIGN.md defines the 
 - Authenticated shell includes a keyboard skip link to main. Actions must be visible only to roles allowed at their destination.
 
 Current hardening scope (28 October2026): reliable drafts/errors/navigation, closing-date lookup/conflicts, map/search recovery and accessible feedback. No visual redesign.
+
+Completeness pass (29 October2026): shared empty states and field help, 40/44px control sizing through shared variables, top-aligned form fields, sibling modal layering, permission-aware store/refill actions, preserved store handoff context and honest completed/empty states. Surface scope and verification limits are in completeness-surface.md.

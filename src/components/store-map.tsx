@@ -17,6 +17,7 @@ const SATELLITE_STYLE={version:8 as const,sources:{satellite:{type:"raster" as c
 function statusOf(s:StorePoint){if(s.fridgeStatus==="maintenance")return{key:"maintenance",label:"ບຳລຸງຮັກສາ"};if(s.refillStatus)return{key:"refill",label:s.refillStatus==="delivering"?"ກຳລັງສົ່ງ":s.refillStatus==="preparing"?"ກຳລັງຈັດສິນຄ້າ":"ລໍຖ້າຈັດສິນຄ້າ"};if(s.due)return{key:"due",label:"ຮອດຮອບກວດ"};if(s.lowStock)return{key:"low",label:"ຈຳນວນຄົງເຫຼືອຕ່ຳ"};return{key:"ok",label:"ປົກກະຕິ"}}
 const moneyFormat=new Intl.NumberFormat("en-US",{maximumFractionDigits:2});
 const money=(n:number)=>`${moneyFormat.format(n)} LAK`;
+function markerLabel(fridgeNumber:string,ordinal:number){const digits=fridgeNumber.trim().match(/^(?:FR-)?(\d+)$/i)?.[1].replace(/^0+(?=\d)/,"");return digits&&digits.length<=3?digits:ordinal<=999?String(ordinal):"—"}
 export function StoreMap({stores,role}:{stores:StorePoint[];role:UserRole|null}){
  const mapNode=useRef<HTMLDivElement|null>(null),mapRef=useRef<MapLibreMap|null>(null),markers=useRef<Map<string,Marker>>(new Map()),viewBeforeSelect=useRef<{center:[number,number];zoom:number}|null>(null);
  const [selected,setSelected]=useState<string|null>(null),[mapMode,setMapMode]=useState<"street"|"satellite">("street"),[query,setQuery]=useState(""),[filter,setFilter]=useState<FilterKey>("all"),[moreFilters,setMoreFilters]=useState(false),[loaded,setLoaded]=useState(false);
@@ -26,6 +27,7 @@ export function StoreMap({stores,role}:{stores:StorePoint[];role:UserRole|null})
  const previousMapMode=useRef(mapMode);
  useEffect(()=>{if(selected)detailRef.current?.focus()},[selected]);
  const counts=useMemo(()=>({all:stores.length,due:stores.filter(s=>s.due).length,refill:stores.filter(s=>!!s.refillStatus).length,low:stores.filter(s=>s.lowStock).length,maintenance:stores.filter(s=>s.fridgeStatus==="maintenance").length,outstanding:stores.filter(s=>s.outstanding>0).length}),[stores]);
+ const markerLabels=useMemo(()=>new Map(stores.map((store,index)=>[store.id,markerLabel(store.fridgeNumber,index+1)])),[stores]);
  const visible=useMemo(()=>{const q=query.trim().toLocaleLowerCase();return stores.filter(s=>(!q||`${s.name} ${s.address} ${s.assetCode}`.toLocaleLowerCase().includes(q))&&(filter==="all"||(filter==="due"&&s.due)||(filter==="refill"&&!!s.refillStatus)||(filter==="low"&&s.lowStock)||(filter==="maintenance"&&s.fridgeStatus==="maintenance")||(filter==="outstanding"&&s.outstanding>0)))},[stores,query,filter]);
  const fit=useCallback((list:StorePoint[])=>{const map=mapRef.current;if(!map)return;if(!list.length){map.easeTo({center:DEFAULT_CENTER,zoom:12,duration:350});return}if(list.length===1){map.easeTo({center:[list[0].longitude,list[0].latitude],zoom:16,duration:400});return}const b=new maplibregl.LngLatBounds();list.forEach(s=>b.extend([s.longitude,s.latitude]));map.fitBounds(b,{padding:{top:80,bottom:80,left:70,right:70},maxZoom:15,duration:400})},[]);
  const focus=useCallback((s:StorePoint)=>{setSelected(s.id);const map=mapRef.current;if(!map)return;if(!viewBeforeSelect.current)viewBeforeSelect.current={center:[map.getCenter().lng,map.getCenter().lat],zoom:map.getZoom()};map.stop();map.setCenter([Number(s.longitude),Number(s.latitude)]);},[]);
@@ -70,16 +72,16 @@ export function StoreMap({stores,role}:{stores:StorePoint[];role:UserRole|null})
        pin.append(number);label.append(name,fridge);element.append(pin,label);
      }
      element.className=`ml-store-marker ${status.key}`;
-     element.title=store.name;
-     element.setAttribute("aria-label",`${store.name}, ${status.label}`);
-     element.querySelector(".ml-marker-pin b")!.textContent=store.fridgeNumber.replace(/^FR-0*/,"")||store.fridgeNumber;
+     element.title=`${store.name} · ${store.fridgeNumber}`;
+     element.setAttribute("aria-label",`${store.name}, ຕູ້ ${store.fridgeNumber}, ${status.label}`);
+     element.querySelector(".ml-marker-pin b")!.textContent=markerLabels.get(store.id)!;
      element.querySelector(".ml-marker-label b")!.textContent=store.name;
      element.querySelector(".ml-marker-label small")!.textContent=`ຕູ້ ${store.fridgeNumber}`;
      element.onclick=event=>{event.stopPropagation();focus(store)};
      if(existing)existing.setLngLat([Number(store.longitude),Number(store.latitude)]);
      else markerStore.set(store.id,new maplibregl.Marker({element,anchor:"bottom",offset:[0,0]}).setLngLat([Number(store.longitude),Number(store.latitude)]).addTo(map));
    });
- },[visible,loaded,focus]);
+ },[visible,loaded,focus,markerLabels]);
  useEffect(()=>{markers.current.forEach((marker,id)=>marker.getElement().classList.toggle("is-selected",selected===id))},[selected,visible,loaded]);
  useEffect(()=>{if(!loaded)return;const frame=requestAnimationFrame(()=>fit(visible));return()=>cancelAnimationFrame(frame)},[visible,loaded,fit]);
  const chosen=stores.find(s=>s.id===selected)||null;const filters:Array<{key:FilterKey;label:string}>=[{key:"all",label:"ທັງໝົດ"},{key:"due",label:"ຮອດຮອບ"},{key:"refill",label:"ເຕີມສິນຄ້າ"},{key:"low",label:"ຈຳນວນຄົງເຫຼືອຕ່ຳ"},{key:"maintenance",label:"ບຳລຸງ"},{key:"outstanding",label:"ຄ້າງຮັບ"}];
