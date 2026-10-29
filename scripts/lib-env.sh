@@ -8,6 +8,15 @@ env_value() {
   sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$ROOT/.env" | tail -n 1 | sed -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/"
 }
 
+# The installed app's mutable files can live outside the repository. Never resolve a relative override.
+runtime_data_directory() {
+  if [ "${YOGURT_DATA_ROOT+x}" != x ]; then printf '%s' "$ROOT/.yogurt"; return 0; fi
+  case "$YOGURT_DATA_ROOT" in
+    /*) printf '%s' "$YOGURT_DATA_ROOT" ;;
+    *) echo "YOGURT_DATA_ROOT must be an absolute path" >&2; return 2 ;;
+  esac
+}
+
 # DATABASE_URL without Prisma's ?schema=... part, which psql and pg_dump do not accept.
 database_url() {
   postgres_database_url "$(env_value DATABASE_URL)"

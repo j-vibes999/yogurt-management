@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { mkdir, open, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { runtimeDataDirectory } from "./runtime-paths.ts";
 
 export const MAX_RECEIPT_BYTES = 5 * 1024 * 1024;
 const receiptNamePattern = /^receipt-[A-Za-z0-9-]+\.(?:jpg|jpeg|png|webp|pdf)$/;
@@ -18,7 +19,7 @@ export function isSafeReceiptName(name: string) {
 }
 
 export function privateReceiptDirectory(rootDirectory = process.cwd()) {
-  return path.join(rootDirectory, ".yogurt", "private-receipts");
+  return path.join(runtimeDataDirectory(rootDirectory), "private-receipts");
 }
 
 function hasPngStructure(bytes: Buffer) {

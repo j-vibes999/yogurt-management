@@ -6,19 +6,21 @@ export PATH="/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/opt/postgresql@16/bi
 . "$ROOT/scripts/lib-env.sh"
 . "$ROOT/scripts/lib-e2e.sh"
 PATH="$(pg_client_path)$PATH"
-BACKUP=${1:-$(ls -1t .yogurt/backups/yogurt_ops-*.dump 2>/dev/null | head -1)}
+RUNTIME_DATA=$(runtime_data_directory)
+BACKUP=${1:-$(ls -1t "$RUNTIME_DATA"/backups/yogurt_ops-*.dump 2>/dev/null | head -1)}
 [ -n "$BACKUP" ] || { echo 'No backup found' >&2; exit 2; }
 DIR=$(dirname "$BACKUP")
 BASE_URL=$(local_database_url)
 assert_local_database_url "$BASE_URL"
 TMP_DB="yogurt_e2e_dr_$(date +%Y%m%d%H%M%S)_$$"
 TMP_URL=$(database_named_url "$BASE_URL" "$TMP_DB")
-LOG=$(mktemp /tmp/yogurt-dr-server-XXXXXX.log)
-PID=''; CREATED=false; RESTORE_VERIFIED=false
+LOG=$(mktemp /tmp/yogurt-dr-server-XXXXXX)
+PID=''; CREATED=false; RESTORE_VERIFIED=false; E2E_RUNTIME_DATA=''
 cleanup(){
   rc=$?
   trap - EXIT
   if [ -n "$PID" ]; then kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true; fi
+  if [ -n "$E2E_RUNTIME_DATA" ]; then rm -rf "$E2E_RUNTIME_DATA" || { [ "$rc" -ne 0 ] || rc=1; }; fi
   if [ "$CREATED" = true ]; then dropdb --maintenance-db="$BASE_URL" --if-exists --force "$TMP_DB" >/dev/null 2>&1 || { [ "$rc" -ne 0 ] || rc=1; }; fi
   rm -f "$LOG"
   if [ "$rc" -ne 0 ]; then

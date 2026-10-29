@@ -1,0 +1,9 @@
+{
+  "date": "2026-10-29T07:20:58.101Z",
+  "actualSecretVariantsChecked": 5,
+  "appAndMountedInstallerFilesChecked": 5276,
+  "secretMatches": 0,
+  "installerBytes": 196323452,
+  "installerSha256": "e431290e9444c911fb9de3f87a2f0b31886c87920c32a1d3fdb6b2c86817fcb5",
+  "notarized": false
+}

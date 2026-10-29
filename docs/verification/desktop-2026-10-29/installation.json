@@ -1,0 +1,12 @@
+{
+  "date": "2026-10-29T07:22:34.068Z",
+  "installedApplication": "~/Applications/Yogurt Manager.app",
+  "configurationImported": true,
+  "userData": "~/Library/Application Support/Yogurt Manager",
+  "supabaseReadOnlyCheck": {
+    "httpStatus": 200,
+    "databaseConnected": true,
+    "backupReadiness": false
+  },
+  "productionBusinessTransactionsCreated": 0
+}

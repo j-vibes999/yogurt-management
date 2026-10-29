@@ -28,7 +28,11 @@
     "test:e2e:offline": "node --env-file=.env tests/offline-fallback-e2e.mjs",
     "metrics:vitals": "node scripts/web-vitals-summary.mjs",
     "alerts:test": "ALERT_COOLDOWN_SECONDS=0 ./scripts/send-alert.sh warning alert.test \"YoguManage alert test\"",
-    "db:dr-drill": "E2E_ADDITIONAL_SCRIPT=tests/readiness-workflow-e2e.mjs ./scripts/disaster-recovery-drill.sh"
+    "db:dr-drill": "E2E_ADDITIONAL_SCRIPT=tests/readiness-workflow-e2e.mjs ./scripts/disaster-recovery-drill.sh",
+    "desktop:start": "node node_modules/electron/install.js && electron .",
+    "desktop:build": "node scripts/build-desktop.mjs",
+    "desktop:package": "node scripts/package-desktop.mjs",
+    "desktop:verify": "node scripts/verify-desktop.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
@@ -47,8 +51,11 @@
     "@types/node": "^24.5.2",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
+    "electron": "45.1.0",
+    "electron-builder": "26.18.0",
     "eslint": "^9.36.0",
     "eslint-config-next": "^15.5.28",
+    "playwright": "1.64.1",
     "prisma": "^6.16.2",
     "typescript": "^5.9.2"
   },
@@ -56,5 +63,6 @@
   "overrides": {
     "postcss": "8.5.28",
     "deepmerge-ts": "8.0.0"
-  }
+  },
+  "main": "desktop/main.cjs"
 }

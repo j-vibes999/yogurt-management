@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { logWarn } from "@/lib/logger";
+import { createReadRecovery } from "@/lib/database-recovery";
 
 const makePrisma = () => new PrismaClient({
   log: [
@@ -10,7 +11,7 @@ const makePrisma = () => new PrismaClient({
 });
 
 type PrismaSingleton = ReturnType<typeof makePrisma>;
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaSingleton; slowQueryHook?: boolean };
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaSingleton; slowQueryHook?: boolean; desktopSessionRead?: ReturnType<typeof createReadRecovery> };
 
 export const prisma = globalForPrisma.prisma ?? makePrisma();
 
@@ -25,4 +26,12 @@ if (!globalForPrisma.slowQueryHook) {
   globalForPrisma.slowQueryHook = true;
 }
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+const desktop = Boolean(process.env.YOGURT_DESKTOP_TOKEN);
+if (process.env.NODE_ENV !== "production" || desktop) globalForPrisma.prisma = prisma;
+
+// A warmed native pool can retain closed sockets after a database restart.
+// Recover only authorization reads; financial commands retain their existing
+// idempotency and uncertainty handling and are never automatically replayed here.
+export const readSessionDatabase = desktop
+  ? (globalForPrisma.desktopSessionRead ??= createReadRecovery(async () => { await prisma.$disconnect(); await prisma.$connect(); }))
+  : async <T>(read: () => Promise<T>): Promise<T> => read();

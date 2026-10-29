@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { getSessionSecret, SESSION_COOKIE, verifySession, verifySessionCredentials, type UserRole } from "@/lib/auth-session";
-import { prisma } from "@/lib/prisma";
+import { prisma, readSessionDatabase } from "@/lib/prisma";
 
 /**
  * The signed cookie alone is not enough: its session row must still exist (logout deletes it),
@@ -13,10 +13,10 @@ export async function getCurrentSession() {
   const payload = await verifySession(cookieStore.get(SESSION_COOKIE)?.value, secret);
   if (!payload) return null;
   try {
-    const row = await prisma.userSession.findUnique({
+    const row = await readSessionDatabase(() => prisma.userSession.findUnique({
       where: { id: payload.sid },
       select: { userId: true, expiresAt: true, user: { select: { id: true, email: true, fullName: true, role: true, isActive: true, passwordHash: true } } },
-    });
+    }));
     const user = row?.user;
     if (!row || !user || row.userId !== payload.userId || row.expiresAt.getTime() <= Date.now() || !user.isActive) return null;
     if (!(await verifySessionCredentials(payload, user.passwordHash, secret))) return null;

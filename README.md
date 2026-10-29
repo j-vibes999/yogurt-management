@@ -5,15 +5,16 @@ refills, driver audits and payments, expenses, reports and alerts. The interface
 
 Next.js 15 (App Router) · React 19 · TypeScript · Prisma 6 · Supabase PostgreSQL.
 
-## Current status — GitHub source, Supabase database
+## Current status — Mac desktop app, GitHub source, Supabase database
 
 - Supabase PostgreSQL holds the active application database (`DATABASE_URL`).
+- The owner approved an installed Apple Silicon Mac app on 29 October 2026. It packages the existing UI/backend, runs only while the app is open, and retains the existing Supabase data. See [Mac desktop installation and builds](docs/DESKTOP.md).
 - Source repository: [j-vibes999/yogurt-management](https://github.com/j-vibes999/yogurt-management).
 - On 29 October 2026 the owner requested GitHub storage only and will deploy the website separately. The former Mac web server, dedicated Yogurt Cloudflare tunnel, health monitor and backup schedules are stopped and removed from automatic startup. Local maintenance PostgreSQL is stopped; its old data is retained.
 - GitHub stores code and migration files. It does not contain the database, `.env`, passwords, payment slips or backups. The existing Supabase database remains unchanged.
 - No automatic website deployment is configured in this repository. See [Deploying later](docs/DEPLOYMENT.md). Do not restore Mac background hosting or run the update/setup launcher unless the owner explicitly requests it.
 
-The older Mac helpers below remain available for deliberate manual use. They can start services when run; cloning or pushing the repository does not start them.
+For daily desktop use, open **Yogurt Manager.app** and close its last window or use Cmd-Q to stop it. The older Mac helpers below remain available for deliberate manual maintenance; they are not the desktop app launcher and can start retired services when run. Cloning or pushing the repository does not start services.
 
 ## Everyday tasks (double-click)
 

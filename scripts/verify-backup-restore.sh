@@ -7,7 +7,8 @@ export PATH
 . "$ROOT/scripts/lib-env.sh"
 PATH="$(pg_client_path)$PATH"
 cd "$ROOT"
-BACKUP=${1:-$(ls -1t "$ROOT"/.yogurt/backups/yogurt_ops-*.dump 2>/dev/null | head -1)}
+RUNTIME_DATA=$(runtime_data_directory)
+BACKUP=${1:-$(ls -1t "$RUNTIME_DATA"/backups/yogurt_ops-*.dump 2>/dev/null | head -1)}
 [ -n "$BACKUP" ] || { echo 'No backup found' >&2; exit 2; }
 DIR=$(dirname "$BACKUP")
 ADMINURL=''; NAME=''; CREATED=false

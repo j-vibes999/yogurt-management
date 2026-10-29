@@ -1,0 +1,20 @@
+{
+  "date": "2026-10-29T07:18:12.288Z",
+  "executable": "dist-desktop/mac-arm64/Yogurt Manager.app/Contents/MacOS/Yogurt Manager",
+  "target": "darwin-arm64",
+  "productionDatabaseMutated": false,
+  "checks": [
+    "packaged production login, Secure HttpOnly session cookie, native Prisma database connection",
+    "private receipt import from .yogurt/supabase.env preserves source and verifies destination",
+    "ordinary browsers cannot reach backend, login/session or static assets",
+    "a duplicate application launch exits without a duplicate backend or losing the current session",
+    "closing the last window quits the app and stops the owned loopback backend",
+    "stable browser storage/session survives restart; replay preserves a single financial entry/audit",
+    "private receipt upload/read persists across application restart",
+    "native file export accepts an app-origin CSV download without leaving the workspace",
+    "receipt preview preserves the main application and closing it keeps the session active",
+    "database disconnection never claims a successful write; reconnect restores database session",
+    "force-killed app leaves no surviving owned backend listener"
+  ],
+  "signing": "Local-use unsigned/ad-hoc; not notarized"
+}

@@ -9,7 +9,8 @@ export PATH
 . "$ROOT/scripts/lib-env.sh"
 PATH="$(pg_client_path)$PATH"
 cd "$ROOT"
-DIR="$ROOT/.yogurt/backups"
+RUNTIME_DATA=$(runtime_data_directory)
+DIR="$RUNTIME_DATA/backups"
 STAMP="$(date '+%Y%m%d-%H%M%S')-$$"
 BASE="$DIR/yogurt_ops-$STAMP"
 TMP="$BASE.dump.tmp"
@@ -41,9 +42,9 @@ mv "$TMP" "$FINAL"
 
 # Payment-slip images live outside the database, so they are archived next to the dump.
 RECEIPTS=""
-if [ -d "$ROOT/.yogurt/private-receipts" ] && [ -n "$(ls -A "$ROOT/.yogurt/private-receipts" 2>/dev/null)" ]; then
+if [ -d "$RUNTIME_DATA/private-receipts" ] && [ -n "$(ls -A "$RUNTIME_DATA/private-receipts" 2>/dev/null)" ]; then
   RECEIPTS="$BASE.receipts.tar.gz"
-  tar -czf "$RECEIPTS" -C "$ROOT/.yogurt" private-receipts
+  tar -czf "$RECEIPTS" -C "$RUNTIME_DATA" private-receipts
   (cd "$DIR" && shasum -a 256 "$(basename "$RECEIPTS")" > "$(basename "$RECEIPTS").sha256")
 fi
 

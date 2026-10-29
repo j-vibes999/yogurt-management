@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { runtimeDataDirectory } from "./runtime-paths.ts";
 
 export type BackupMetadata = {
   ok?: boolean;
@@ -57,7 +58,7 @@ export function assertLocalScratchDatabase(databaseUrl: string) {
 
 /** A corrupt or absent state file provides no readiness evidence. */
 export async function loadBackupReadiness(root: string, databaseUrl: string, now = Date.now()) {
-  const directory = path.join(root, ".yogurt", "backups");
+  const directory = path.join(runtimeDataDirectory(root), "backups");
   async function read(name: string): Promise<BackupMetadata | null> {
     try {
       const data: unknown = JSON.parse(await fs.readFile(path.join(directory, name), "utf8"));

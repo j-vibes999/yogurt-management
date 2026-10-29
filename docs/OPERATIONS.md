@@ -6,6 +6,8 @@ On 29 October 2026 the owner requested that the code be stored in GitHub and the
 
 See [Deploying later](DEPLOYMENT.md). The sections below preserve the previous Mac operating/recovery procedure; job schedules describe that former setup, not active jobs.
 
+The owner subsequently approved a private Mac desktop app using the existing Supabase database. This does not restore public hosting or background schedules: its protected loopback backend exists only while the app is open. See [Desktop operation](DESKTOP.md). Mutable desktop files are under `~/Library/Application Support/Yogurt Manager/runtime`; set the matching absolute `YOGURT_DATA_ROOT` for manual backup/restore tools so new receipts and readiness evidence use the same directory. With no override, the tools preserve the legacy repository `.yogurt` location. Scratch E2E processes use a separate temporary runtime directory.
+
 ## Retired Mac deployment
 
 The Next.js server runs on this Mac at `127.0.0.1:3000` behind a Cloudflare tunnel. `DATABASE_URL` is the active Supabase database. `LOCAL_DATABASE_URL` is the old Mac database; it supplies a local maintenance connection for scratch databases, not the live application's data. Keep credentials in the ignored `.env` (mode 600). The project’s launchd jobs use its original absolute project directory.

@@ -12,13 +12,14 @@ BASE_URL=$(local_database_url)
 assert_local_database_url "$BASE_URL"
 TMP_DB="yogurt_e2e_$(date +%Y%m%d%H%M%S)_$$"
 TMP_URL=$(database_named_url "$BASE_URL" "$TMP_DB")
-DUMP=$(mktemp /tmp/yogurt-e2e-XXXXXX.dump)
-LOG=$(mktemp /tmp/yogurt-e2e-server-XXXXXX.log)
-PID=''; CREATED=false
+DUMP=$(mktemp /tmp/yogurt-e2e-dump-XXXXXX)
+LOG=$(mktemp /tmp/yogurt-e2e-server-XXXXXX)
+PID=''; CREATED=false; E2E_RUNTIME_DATA=''
 cleanup(){
   rc=$?
   trap - EXIT
   if [ -n "$PID" ]; then kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true; fi
+  if [ -n "$E2E_RUNTIME_DATA" ]; then rm -rf "$E2E_RUNTIME_DATA" || { [ "$rc" -ne 0 ] || rc=1; }; fi
   if [ "$CREATED" = true ]; then dropdb --maintenance-db="$BASE_URL" --if-exists --force "$TMP_DB" >/dev/null 2>&1 || { [ "$rc" -ne 0 ] || rc=1; }; fi
   rm -f "$DUMP" "$LOG"
   exit "$rc"

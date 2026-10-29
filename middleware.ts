@@ -71,7 +71,12 @@ export async function middleware(request: NextRequest) {
   const internalOrigin = process.env.INTERNAL_APP_ORIGIN ?? `http://127.0.0.1:${process.env.PORT || request.nextUrl.port || "3000"}`;
   let sessionCheck: Response;
   try {
-    sessionCheck = await fetch(new URL("/api/session", internalOrigin), { headers: { cookie: `${SESSION_COOKIE}=${request.cookies.get(SESSION_COOKIE)?.value ?? ""}` }, cache: "no-store" });
+    const sessionHeaders: Record<string,string> = { cookie: `${SESSION_COOKIE}=${request.cookies.get(SESSION_COOKIE)?.value ?? ""}` };
+    // The desktop runtime authenticates every loopback request before it reaches Next.
+    // Forward only the capability received on this already authenticated app request.
+    const desktopCapability = request.headers.get("x-yogurt-desktop-token");
+    if (desktopCapability) sessionHeaders["x-yogurt-desktop-token"] = desktopCapability;
+    sessionCheck = await fetch(new URL("/api/session", internalOrigin), { headers: sessionHeaders, cache: "no-store" });
   } catch {
     return secure(new NextResponse("ກວດສອບການເຂົ້າລະບົບບໍ່ໄດ້ຊົ່ວຄາວ; ກະລຸນາລອງໃໝ່ (Session verification is temporarily unavailable)", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } }), request);
   }

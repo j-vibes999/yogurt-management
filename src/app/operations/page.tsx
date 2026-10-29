@@ -9,6 +9,7 @@ import { RecipeManager } from "@/components/recipe-manager";
 import { SectionTabs } from "@/components/section-tabs";
 import { ClosingForm } from "@/components/operations-forms";
 import { loadBackupReadiness } from "@/lib/backup-readiness";
+import { runtimeDataDirectory } from "@/lib/runtime-paths";
 import { ResponsiveDisclosure } from "@/components/responsive-disclosure";
 
 export const dynamic="force-dynamic";
@@ -16,7 +17,7 @@ export const revalidate=0;
 
 async function getLatestBackup(){
   try{
-    const dir=path.join(process.cwd(),".yogurt","backups");
+    const dir=path.join(runtimeDataDirectory(),"backups");
     const names=(await readdir(dir)).filter(name=>name.endsWith(".dump"));
     const rows=await Promise.all(names.map(async name=>({name,info:await stat(path.join(dir,name))})));
     rows.sort((a,b)=>b.info.mtimeMs-a.info.mtimeMs);

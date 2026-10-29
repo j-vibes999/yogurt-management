@@ -1,0 +1,12 @@
+{
+  "date": "2026-10-29T07:41:26.785Z",
+  "applicationRoot": "Installed app Contents/Resources/backend",
+  "runtime": "Node 26 with packaged Next/Prisma; desktop capability and shared-pool mode enabled",
+  "isolatedLocalDatabase": true,
+  "productionBusinessTransactionsCreated": 0,
+  "passedSuites": [
+    "tests/authenticated-smoke.mjs",
+    "tests/business-workflow-e2e.mjs",
+    "tests/readiness-workflow-e2e.mjs"
+  ]
+}

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { runtimeDataDirectory } from "@/lib/runtime-paths";
 
 const metricSchema = z.object({
   name: z.enum(["CLS", "FCP", "FID", "INP", "LCP", "TTFB"]),
@@ -39,9 +40,9 @@ function getCollectorBuild() {
 }
 
 async function appendMetric(line: string) {
-  const dir = path.join(process.cwd(), ".yogurt", "metrics");
+  const dir = path.join(runtimeDataDirectory(), "metrics");
   const file = path.join(dir, "web-vitals.ndjson");
-  await fs.mkdir(dir, { recursive: true });
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   try {
     const stat = await fs.stat(file);
     if (stat.size > 5 * 1024 * 1024) await fs.rename(file, path.join(dir, `web-vitals-${Date.now()}.ndjson`));

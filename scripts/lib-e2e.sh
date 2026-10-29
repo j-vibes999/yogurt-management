@@ -1,7 +1,8 @@
 # Source after lib-env.sh. Every write below is restricted to a newly created local scratch DB.
 prepare_clone_e2e() {
-  DATABASE_URL="$TMP_URL" node "$ROOT/node_modules/prisma/build/index.js" migrate deploy
-  DATABASE_URL="$TMP_URL" node "$ROOT/scripts/harden-supabase-api.mjs"
+  E2E_RUNTIME_DATA=$(mktemp -d "${TMPDIR:-/tmp}/yogurt-e2e-runtime-XXXXXX") || return 1
+  DATABASE_URL="$TMP_URL" YOGURT_DATA_ROOT="$E2E_RUNTIME_DATA" node "$ROOT/node_modules/prisma/build/index.js" migrate deploy
+  DATABASE_URL="$TMP_URL" YOGURT_DATA_ROOT="$E2E_RUNTIME_DATA" node "$ROOT/scripts/harden-supabase-api.mjs"
   ADMIN_EMAIL="e2e-$(node -e 'process.stdout.write(crypto.randomUUID())')@example.test"
   ADMIN_PASSWORD=$(node -e 'process.stdout.write(crypto.randomBytes(32).toString("base64url"))')
   E2E_FIXTURE_MODE=${E2E_FIXTURE_MODE:-minimal}
@@ -12,13 +13,13 @@ prepare_clone_e2e() {
     E2E_FIXTURE_STORE_ID=e2e-readiness-store
   fi
   export ADMIN_EMAIL ADMIN_PASSWORD E2E_FIXTURE_MODE E2E_FIXTURE_PRODUCT_ID E2E_FIXTURE_STORE_ID
-  DATABASE_URL="$TMP_URL" node "$ROOT/scripts/prepare-e2e-clone.mjs"
+  DATABASE_URL="$TMP_URL" YOGURT_DATA_ROOT="$E2E_RUNTIME_DATA" node "$ROOT/scripts/prepare-e2e-clone.mjs"
 }
 
 run_clone_e2e() {
   if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then echo "Test port $PORT is already in use" >&2; return 2; fi
   E2E_BASE_URL="http://127.0.0.1:$PORT"
-  DATABASE_URL="$TMP_URL" INTERNAL_APP_ORIGIN="$E2E_BASE_URL" PORT="$PORT" node "$ROOT/node_modules/next/dist/bin/next" start -H 127.0.0.1 -p "$PORT" >"$LOG" 2>&1 & PID=$!
+  DATABASE_URL="$TMP_URL" YOGURT_DATA_ROOT="$E2E_RUNTIME_DATA" INTERNAL_APP_ORIGIN="$E2E_BASE_URL" PORT="$PORT" node "$ROOT/node_modules/next/dist/bin/next" start -H 127.0.0.1 -p "$PORT" >"$LOG" 2>&1 & PID=$!
   _ready=false
   for _ in $(seq 1 60); do
     # Availability is independent of backup readiness: scratch targets intentionally differ.
@@ -27,9 +28,9 @@ run_clone_e2e() {
     sleep .5
   done
   [ "$_ready" = true ] || { cat "$LOG" >&2; echo 'Clone server availability timed out' >&2; return 1; }
-  DATABASE_URL="$TMP_URL" E2E_BASE_URL="$E2E_BASE_URL" node --env-file=.env "$ROOT/tests/authenticated-smoke.mjs"
-  DATABASE_URL="$TMP_URL" E2E_BASE_URL="$E2E_BASE_URL" node --env-file=.env "$ROOT/tests/business-workflow-e2e.mjs"
+  DATABASE_URL="$TMP_URL" YOGURT_DATA_ROOT="$E2E_RUNTIME_DATA" E2E_BASE_URL="$E2E_BASE_URL" node --env-file=.env "$ROOT/tests/authenticated-smoke.mjs"
+  DATABASE_URL="$TMP_URL" YOGURT_DATA_ROOT="$E2E_RUNTIME_DATA" E2E_BASE_URL="$E2E_BASE_URL" node --env-file=.env "$ROOT/tests/business-workflow-e2e.mjs"
   if [ -n "${E2E_ADDITIONAL_SCRIPT:-}" ]; then
-    DATABASE_URL="$TMP_URL" E2E_BASE_URL="$E2E_BASE_URL" node --env-file=.env "$E2E_ADDITIONAL_SCRIPT"
+    DATABASE_URL="$TMP_URL" YOGURT_DATA_ROOT="$E2E_RUNTIME_DATA" E2E_BASE_URL="$E2E_BASE_URL" node --env-file=.env "$E2E_ADDITIONAL_SCRIPT"
   fi
 }
