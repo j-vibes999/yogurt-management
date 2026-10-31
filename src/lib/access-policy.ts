@@ -1,4 +1,5 @@
 import type { UserRole } from "@/lib/auth-session";
+import { rolesForNativeApi } from "./native-access.ts";
 
 export function rolesForPage(pathname:string):UserRole[]|null{
   if(pathname.startsWith('/uploads/receipts/')) return ['admin'];
@@ -17,6 +18,7 @@ export function canRoleOpen(role:UserRole|null|undefined,href:string):boolean{
 }
 
 export function rolesForApi(pathname:string,method:string):UserRole[]|null{
+  if(pathname.startsWith('/api/native/v1/')) return rolesForNativeApi(pathname,method);
   if(pathname==='/api/health'||pathname==='/api/session') return null;
   if(pathname.startsWith('/api/metrics/web-vitals')||pathname.startsWith('/api/shell-state')||pathname.startsWith('/api/nav-counts')||pathname.startsWith('/api/notifications')||pathname.startsWith('/api/search')||pathname.startsWith('/api/map/search')||pathname.startsWith('/api/auth/logout')) return null;
   if(pathname.startsWith('/api/production-batches')||pathname.startsWith('/api/inventory/')||pathname.startsWith('/api/finished-goods/adjust')||pathname.startsWith('/api/recipes')) return ['admin','production'];

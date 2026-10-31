@@ -22,3 +22,9 @@ dist-desktop/
 *.dump
 *.dump.*
 *.receipts.tar.gz*
+
+# Swift/native build products and downloaded bundled runtimes.
+native/.build/
+build/native/
+dist-native/
+native/.swiftpm/
