@@ -24,13 +24,15 @@ import Security
             guard FileManager.default.fileExists(atPath: url.path) else { throw NativeFailure("ຊຸດແອັບບໍ່ສົມບູນ. ກະລຸນາເປີດ Yogurt Manager Native.app ທີ່ປະກອບແລ້ວ") }
         }
         try FileManager.default.createDirectory(at: dataRoot, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let appRootPath = try Self.canonicalDirectoryPath(backend)
+        let dataRootPath = try Self.canonicalDirectoryPath(dataRoot)
         var bytes = [UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { throw NativeFailure("ສ້າງ capability ບໍ່ໄດ້") }
         capability = bytes.map { String(format: "%02x", $0) }.joined()
         stopping = false; buffer.removeAll(keepingCapacity: false)
         let child = Process(); let inbound = Pipe(); let outbound = Pipe(); let diagnostics = Pipe()
         child.executableURL = helper; child.arguments = [node.path, bootstrap.path]
-        child.currentDirectoryURL = dataRoot
+        child.currentDirectoryURL = URL(fileURLWithPath: dataRootPath, isDirectory: true)
         child.environment = ["PATH": "/usr/bin:/bin", "HOME": FileManager.default.homeDirectoryForCurrentUser.path,
                              "TMPDIR": FileManager.default.temporaryDirectory.path]
         child.standardInput = inbound; child.standardOutput = outbound; child.standardError = diagnostics
@@ -48,7 +50,7 @@ import Security
             do {
                 try child.run()
                 try send(.object(["version": .number(1), "type": .string("bootstrap"), "port": .number(43188),
-                    "appRoot": .string(backend.path), "dataRoot": .string(dataRoot.path), "capability": .string(capability),
+                    "appRoot": .string(appRootPath), "dataRoot": .string(dataRootPath), "capability": .string(capability),
                     "config": .object(["DATABASE_URL": .string(configuration.databaseURL), "SESSION_SECRET": .string(configuration.sessionSecret)])]))
                 heartbeat = Task { [weak self] in
                     while !Task.isCancelled {
@@ -82,7 +84,7 @@ import Security
             case "ready":
                 deadline?.cancel(); let waiting = continuation; continuation = nil; waiting?.resume(returning: capability)
             case "failed", "failure":
-                fail(NativeFailure(event.text("code") == "PORT_BUSY" ? "Port 43188 ຖືກໃຊ້ຢູ່. ປິດ Yogurt Manager Native ຕົວທີ່ເປີດຄ້າງແລ້ວລອງໃໝ່" : "Backend ຢຸດເຮັດວຽກ. ລາຍການຄ້າງຖືກເກັບໄວ້; ເປີດແອັບໃໝ່ເພື່ອກວດກາ"))
+                fail(NativeFailure(Self.failureMessage(code: event.text("code"))))
             case "shutdown", "stopped": break
             default: fail(NativeFailure("Backend protocol ບໍ່ຖືກຕ້ອງ"))
             }
@@ -105,6 +107,28 @@ import Security
         try? send(.object(["version": .number(1), "type": .string("shutdown")]))
         try? input?.close(); input = nil
     }
+    /// The bootstrap rejects symlinked path components. Foundation reports temporary
+    /// folders as /var/..., which is itself a symlink, so resolve with realpath(3).
+    nonisolated static func canonicalDirectoryPath(_ url: URL) throws -> String {
+        guard let resolved = realpath(url.path, nil) else { throw NativeFailure("ບໍ່ພົບໂຟນເດີຂອງແອັບ") }
+        defer { free(resolved) }
+        let path = String(cString: resolved)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else { throw NativeFailure("ບໍ່ພົບໂຟນເດີຂອງແອັບ") }
+        return path
+    }
+
+    /// Only the supervisor/bootstrap's own codes are shown; anything else could carry backend diagnostics.
+    nonisolated static func failureMessage(code: String) -> String {
+        switch code {
+        case "PORT_BUSY": return "Port 43188 ຖືກໃຊ້ຢູ່. ປິດ Yogurt Manager Native ຕົວທີ່ເປີດຄ້າງແລ້ວລອງໃໝ່ (PORT_BUSY)"
+        case "CONFIGURATION": return "ການຕັ້ງຄ່າ Supabase ຫຼືໂຟນເດີແອັບບໍ່ຖືກຕ້ອງ. ນຳເຂົ້າໄຟລ໌ .env ໃໝ່ແລ້ວລອງອີກຄັ້ງ (CONFIGURATION)"
+        case "CONTROL_PROTOCOL", "HEARTBEAT_TIMEOUT", "SPAWN_FAILED", "CHILD_EXIT":
+            return "Backend ຢຸດເຮັດວຽກ. ລາຍການຄ້າງຖືກເກັບໄວ້; ເປີດແອັບໃໝ່ເພື່ອກວດກາ (\(code))"
+        default: return "Backend ເປີດບໍ່ສຳເລັດ. ລາຍການຄ້າງຖືກເກັບໄວ້; ເປີດແອັບໃໝ່ເພື່ອກວດກາ (START_FAILED)"
+        }
+    }
+
     func waitForStop() async {
         stop()
         for _ in 0..<60 {
