@@ -142,7 +142,7 @@ struct StoresView: View {
         }
         .task { await state.load(model, "stores") }
         .sheet(isPresented: $create, onDismiss: { Task { await state.refresh() } }) { OperationsStoreEditor(model: model, store: nil) }
-        .sheet(item: $detail, onDismiss: { Task { await state.refresh() } }) { row in StoreDetailView(model: model, storeId: row.id).frame(minWidth: 880, minHeight: 650) }
+        .sheet(item: $detail, onDismiss: { Task { await state.refresh() } }) { row in StoreDetailView(model: model, storeId: row.id, showsClose: true).frame(minWidth: 880, minHeight: 650) }
     }
 }
 
@@ -197,6 +197,9 @@ struct OperationsStoreEditor: View {
 struct StoreDetailView: View {
     @ObservedObject var model: AppModel
     let storeId: String
+    /// A sheet on macOS cannot be dismissed with Escape unless it offers a cancel action.
+    var showsClose = false
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var state = FeatureState()
     @State private var edit = false
     @State private var archive = false
@@ -210,6 +213,7 @@ struct StoreDetailView: View {
     private var canOperate: Bool { model.canWrite && state.source == "database" && ["admin", "driver"].contains(model.session?.role ?? "") }
     var body: some View {
         Workspace(title: store.text("name").isEmpty ? "ຂໍ້ມູນຮ້ານ" : store.text("name"), subtitle: store.text("address"), domain: Destination.stores.domain) {
+            if showsClose { Button("ປິດ") { dismiss() }.keyboardShortcut(.cancelAction) }
             OperationsReadActions(state: state)
             if model.session?.role == "admin" { Button("ແກ້ໄຂ") { edit = true }.disabled(!canOperate || store.id.isEmpty) }
         } content: {

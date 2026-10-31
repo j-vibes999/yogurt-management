@@ -61,7 +61,7 @@ struct ReadStateView<Content: View>: View {
             if state.data != .null {
                 if state.source == "demo" { StatusLabel("ຂໍ້ມູນສາທິດ · ບັນທຶກລາຍການບໍ່ໄດ້", tone: .warning) }
                 content
-                if !state.generatedAt.isEmpty { Text("ອັບເດດ \(state.generatedAt) · Asia/Vientiane").font(Theme.font(11)).foregroundStyle(Theme.muted).textSelection(.enabled) }
+                if !state.generatedAt.isEmpty { Text("ອັບເດດ \(operationsDate(state.generatedAt))").font(Theme.font(11)).foregroundStyle(Theme.muted).textSelection(.enabled) }
             } else if !state.loading && state.error == nil { EmptyNotice(title: "ຍັງບໍ່ມີຂໍ້ມູນ") }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -89,6 +89,8 @@ struct AmountText: View {
     init(_ value: Decimal, currency: Bool = true) { self.value = value; self.currency = currency }
     var body: some View {
         let formatter = NumberFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.numberStyle = .decimal
+        // The POSIX locale has no grouping separator; keep 1,234,567.25 like the web app.
+        formatter.usesGroupingSeparator = true; formatter.groupingSeparator = ","; formatter.groupingSize = 3
         formatter.minimumFractionDigits = currency ? 2 : 0; formatter.maximumFractionDigits = currency ? 2 : 6
         return Text((formatter.string(from: NSDecimalNumber(decimal: value)) ?? "—") + (currency ? " ₭" : "")).monospacedDigit()
     }

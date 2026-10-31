@@ -683,8 +683,8 @@ struct ReportsView: View {
     private var periodLabel: String { dataPeriod == "today" ? "ມື້ນີ້" : dataPeriod == "week" ? "7 ມື້ຫຼ້າສຸດ" : "ເດືອນນີ້" }
     var body: some View {
         Workspace(title: "ລາຍງານທຸລະກິດ", subtitle: "ຍອດຂາຍ, ຕົ້ນທຶນ ແລະກຳໄລຈາກລາຍການທີ່ບັນທຶກ", domain: .finance) {
-            Picker("ໄລຍະເວລາ", selection: $period) { Text("ມື້ນີ້").tag("today"); Text("7 ມື້ຫຼ້າສຸດ").tag("week"); Text("ເດືອນນີ້").tag("month") }.pickerStyle(.segmented).frame(width: 300)
-            Button("ສົ່ງອອກ CSV", systemImage: "square.and.arrow.up") { export() }.disabled(state.data == .null)
+            Picker("ໄລຍະເວລາ", selection: $period) { Text("ມື້ນີ້").tag("today"); Text("7 ມື້ຫຼ້າສຸດ").tag("week"); Text("ເດືອນນີ້").tag("month") }.pickerStyle(.segmented).labelsHidden().frame(width: 300)
+            Button("ສົ່ງອອກ CSV", systemImage: "square.and.arrow.up") { export() }.fixedSize().disabled(state.data == .null)
             Button("ໂຫຼດຄືນ", systemImage: "arrow.clockwise") { Task { await state.refresh() } }
         } content: {
             ReadStateView(state: state) {
@@ -768,7 +768,10 @@ struct OperationsView: View {
             ReadStateView(state: state) {
                 HStack {
                     Picker("ຈັດການ", selection: $tab) { Text("ສິນຄ້າ").tag("products"); Text("ວັດຖຸດິບ").tag("materials"); Text("ສະບັບສູດ").tag("recipes"); if admin { Text("ສຳຮອງຂໍ້ມູນ").tag("backup") } }.pickerStyle(.segmented).frame(maxWidth: 640)
-                    Spacer(); Button("ໂຫຼດຄືນ", systemImage: "arrow.clockwise") { Task { await state.refresh() } }
+                    Spacer()
+                    // The web operations page links these admin tools; the sidebar does not list them.
+                    if admin { ForEach([Destination.fridges, .audit]) { destination in Button(destination.title, systemImage: destination.symbol) { model.navigate(destination) } } }
+                    Button("ໂຫຼດຄືນ", systemImage: "arrow.clockwise") { Task { await state.refresh() } }
                 }.controlSize(.large)
                 if tab == "products" { productsTable }
                 else if tab == "materials" { materialsTable }

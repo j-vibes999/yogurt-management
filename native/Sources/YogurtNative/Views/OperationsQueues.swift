@@ -69,7 +69,7 @@ struct MapWorkspaceView: View {
                 position = .region(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: row["latitude"].double, longitude: row["longitude"].double), span: MKCoordinateSpan(latitudeDelta: 0.015, longitudeDelta: 0.015)))
             }
         }
-        .sheet(item: $detail) { row in StoreDetailView(model: model, storeId: row.id).frame(minWidth: 880, minHeight: 650) }
+        .sheet(item: $detail) { row in StoreDetailView(model: model, storeId: row.id, showsClose: true).frame(minWidth: 880, minHeight: 650) }
     }
     private func selectedStore(_ row: JSONValue) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -322,6 +322,6 @@ struct DriverView: View {
         }
         .task { await state.load(model, "stores"); if let id = model.contextStoreId { auditStore = stores.first { $0.id == id } } }
         .sheet(item: $auditStore, onDismiss: { Task { await state.refresh() } }) { row in OperationsAuditView(model: model, storeId: row.id, paymentOnly: false) }
-        .sheet(item: $detail) { row in StoreDetailView(model: model, storeId: row.id).frame(minWidth: 880, minHeight: 650) }
+        .sheet(item: $detail) { row in StoreDetailView(model: model, storeId: row.id, showsClose: true).frame(minWidth: 880, minHeight: 650) }
     }
 }
