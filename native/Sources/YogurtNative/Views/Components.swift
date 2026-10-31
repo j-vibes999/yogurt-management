@@ -31,7 +31,8 @@ struct Workspace<Actions: View, Content: View>: View {
                     if !subtitle.isEmpty { Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
                 }
                 Spacer(minLength: 8)
-                HStack(spacing: 10) { actions }.controlSize(.large)
+                // Header buttons keep their full labels; the title and subtitle give way instead.
+                HStack(spacing: 10) { actions }.controlSize(.large).fixedSize()
             }.padding(24)
             Divider()
             ScrollView {

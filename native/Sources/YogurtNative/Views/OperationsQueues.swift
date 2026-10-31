@@ -17,11 +17,18 @@ struct MapWorkspaceView: View {
         }
     }
     private var selected: JSONValue? { rows.first { $0.id == selection } }
+    /// `.automatic` zooms a single marker past the deepest map tiles, leaving an empty grid.
+    private var allStoresPosition: MapCameraPosition {
+        let latitudes = rows.map { $0["latitude"].double }, longitudes = rows.map { $0["longitude"].double }
+        guard let south = latitudes.min(), let north = latitudes.max(), let west = longitudes.min(), let east = longitudes.max() else { return .automatic }
+        return .region(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: (south + north) / 2, longitude: (west + east) / 2),
+                                          span: MKCoordinateSpan(latitudeDelta: max((north - south) * 1.4, 0.02), longitudeDelta: max((east - west) * 1.4, 0.02))))
+    }
     var body: some View {
         Workspace(title: "ແຜນທີ່ຮ້ານ", subtitle: "ເລືອກຮ້ານເພື່ອເບິ່ງສິນຄ້າ ແລະວຽກທີ່ຕ້ອງເຮັດ", domain: Destination.map.domain) {
             OperationsReadActions(state: state)
             Toggle("ລາຍການຢ່າງດຽວ", isOn: $listOnly).toggleStyle(.button)
-            Button("ສະແດງທຸກຮ້ານ") { position = .automatic; selection = nil }.disabled(listOnly)
+            Button("ສະແດງທຸກຮ້ານ") { position = allStoresPosition; selection = nil }.disabled(listOnly)
         } content: {
             ReadStateView(state: state) {
                 VStack(spacing: 16) {
@@ -62,7 +69,7 @@ struct MapWorkspaceView: View {
                 }
             }
         }
-        .task { await state.load(model, "map"); if let id = model.contextStoreId { selection = id } }
+        .task { await state.load(model, "map"); if let id = model.contextStoreId { selection = id } else { position = allStoresPosition } }
         .onChange(of: model.contextStoreId) { _, id in selection = id }
         .onChange(of: selection) { _, id in
             if let row = rows.first(where: { $0.id == id }) {
