@@ -185,3 +185,14 @@ test("native Node archive verification requires its official filename checksum a
   assert.throws(() => verifyArchiveAgainstManifest(Buffer.from("changed"), `${emptyHash}  node-fixture.tar.gz\n`, "node-fixture.tar.gz"));
   assert.throws(() => verifyArchiveAgainstManifest(Buffer.alloc(0), `${emptyHash}  another.tar.gz\n`, "node-fixture.tar.gz"));
 });
+
+test("native signing prefers a stable certificate identity so Keychain access survives updates", async () => {
+  const { chooseSigningIdentity } = await import(path.join(repository, "scripts/build-native.mjs"));
+  const development = `  1) ${"A".repeat(40)} "Apple Development: owner@example.test (TEAM123456)"\n     1 valid identities found\n`;
+  const distribution = `  2) ${"B".repeat(40)} "Developer ID Application: Owner (TEAM123456)"\n`;
+  assert.equal(chooseSigningIdentity(development), "A".repeat(40));
+  assert.equal(chooseSigningIdentity(development + distribution), "B".repeat(40));
+  assert.equal(chooseSigningIdentity(`  1) ${"C".repeat(40)} "Apple Distribution: Owner (TEAM123456)"\n`), "-");
+  assert.equal(chooseSigningIdentity("     0 valid identities found\n"), "-");
+  assert.equal(chooseSigningIdentity(development, "-"), "-");
+});

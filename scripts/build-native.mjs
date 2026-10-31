@@ -20,6 +20,18 @@ export function verifyArchiveAgainstManifest(bytes, manifest, name) {
   if (matches.length !== 1 || sha256(bytes) !== matches[0][1]) throw new Error("Node archive checksum verification failed.");
   return matches[0][1];
 }
+
+/**
+ * Keychain items remember the signature of the app that created them. An ad-hoc signature
+ * changes with every build, so each update asks for Keychain access again; a certificate
+ * identity stays the same. Prefer Developer ID, then Apple Development, else ad-hoc ("-").
+ */
+export function chooseSigningIdentity(listing, requested) {
+  if (requested) return requested;
+  const identities = [...listing.matchAll(/^\s*\d+\)\s+([0-9A-F]{40})\s+"(Developer ID Application|Apple Development): [^"]+"\s*$/gm)];
+  const preferred = identities.find(match => match[2] === "Developer ID Application") ?? identities[0];
+  return preferred ? preferred[1] : "-";
+}
 async function captured(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], ...options });
@@ -93,7 +105,7 @@ async function makeIcon(build, resources) {
   await run("/usr/bin/iconutil", ["-c", "icns", iconset, "-o", path.join(resources, "Yogurt.icns")]);
 }
 
-export async function buildNative({ nodeArchive, backend, dmg = false } = {}) {
+export async function buildNative({ nodeArchive, backend, dmg = false, signingIdentity } = {}) {
   if (process.platform !== "darwin" || process.arch !== "arm64") throw new Error("The native package targets Apple Silicon macOS.");
   const build = path.join(repository, "build/native");
   await mkdir(build, { recursive: true });
@@ -138,9 +150,10 @@ export async function buildNative({ nodeArchive, backend, dmg = false } = {}) {
   await run("/usr/bin/plutil", ["-lint", path.join(contents, "Info.plist")]);
   await verifyBackendPayload(path.join(resources, "backend"));
   await scanPayload(application);
-  await run("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", application]);
+  const identity = chooseSigningIdentity(await captured("/usr/bin/security", ["find-identity", "-v", "-p", "codesigning"]), signingIdentity);
+  await run("/usr/bin/codesign", ["--force", "--deep", "--timestamp=none", "--sign", identity, application]);
   await run("/usr/bin/codesign", ["--verify", "--deep", "--strict", application]);
-  const manifest = { version: 1, nodeVersion: NODE_VERSION, officialArchive: archiveName, archiveSHA256: runtime.digest,
+  const manifest = { version: 1, signing: identity === "-" ? "ad-hoc" : "certificate", nodeVersion: NODE_VERSION, officialArchive: archiveName, archiveSHA256: runtime.digest,
     nodeSHA256: sha256(await readFile(path.join(resources, "runtime/node"))), supervisorSHA256: sha256(await readFile(path.join(helpers, "yogurt-supervisor"))),
     backendBuildId: (await readFile(path.join(resources, "backend/.next/BUILD_ID"), "utf8")).trim(),
   };
@@ -157,6 +170,7 @@ export async function buildNative({ nodeArchive, backend, dmg = false } = {}) {
     } finally { await rm(staging, { recursive: true, force: true }); }
   }
   console.log(`Native application staged and verified: ${application}`);
+  console.log(identity === "-" ? "Signed ad-hoc: each update will ask for Keychain access again." : "Signed with a certificate identity: Keychain access carries over to later builds.");
   if (installer) console.log(`Native installer: ${installer}`);
   return { application, installer, manifest };
 }
@@ -164,9 +178,9 @@ export async function buildNative({ nodeArchive, backend, dmg = false } = {}) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const option = name => { const index = args.indexOf(name); return index < 0 ? undefined : args[index + 1]; };
-  const allowed = new Set(["--node-archive", "--backend", "--dmg"]);
-  if (args.some((arg, index) => arg.startsWith("--") && !allowed.has(arg) || ["--node-archive", "--backend"].includes(arg) && (!args[index + 1] || args[index + 1].startsWith("--")))) {
-    console.error("Usage: node scripts/build-native.mjs [--node-archive <official tar.gz>] [--backend <verified backend directory>] [--dmg]");
+  const allowed = new Set(["--node-archive", "--backend", "--dmg", "--sign"]);
+  if (args.some((arg, index) => arg.startsWith("--") && !allowed.has(arg) || ["--node-archive", "--backend", "--sign"].includes(arg) && (!args[index + 1] || args[index + 1].startsWith("--")))) {
+    console.error("Usage: node scripts/build-native.mjs [--node-archive <official tar.gz>] [--backend <verified backend directory>] [--sign <identity hash, or - for ad-hoc>] [--dmg]");
     process.exitCode = 1;
-  } else buildNative({ nodeArchive: option("--node-archive"), backend: option("--backend"), dmg: args.includes("--dmg") }).catch(() => { console.error("Native packaging failed; no application was launched or installed."); process.exitCode = 1; });
+  } else buildNative({ nodeArchive: option("--node-archive"), backend: option("--backend"), dmg: args.includes("--dmg"), signingIdentity: option("--sign") }).catch(() => { console.error("Native packaging failed; no application was launched or installed."); process.exitCode = 1; });
 }
