@@ -144,14 +144,17 @@ struct InventoryView: View {
     }
     @ViewBuilder private var inventoryEditor: some View {
         if editor == "receive" {
-            NativeEditor(title: "ຮັບວັດຖຸດິບ", fields: [
+            NativeEditor(title: "ຮັບວັດຖຸດິບເຂົ້າສາງ", subtitle: "ສະຕັອກຈະເພີ່ມຂຶ້ນ ແລະຕົ້ນທຶນສະເລ່ຍຈະຄິດໄລ່ໃໝ່ຕາມລາຄາທີ່ຊື້.", fields: [
                 EditorField(key: "rawMaterialId", label: "ວັດຖຸດິບ", kind: .choice(mgChoices(materials)), required: true),
-                EditorField(key: "supplierName", label: "ຜູ້ສະໜອງ", required: true),
-                EditorField(key: "quantity", label: "ຈຳນວນ", kind: .decimal, required: true, help: "ທົດສະນິຍົມໄດ້ 6 ຕຳແໜ່ງ"),
-                EditorField(key: "unitPrice", label: "ລາຄາຕໍ່ໜ່ວຍ (LAK)", kind: .decimal, required: true),
-                EditorField(key: "purchaseDate", label: "ວັນທີຊື້", kind: .date, required: true),
+                EditorField(key: "quantity", label: "ຈຳນວນທີ່ຮັບ", kind: .decimal, required: true, help: "ຕາມໜ່ວຍຂອງວັດຖຸດິບ").half(),
+                EditorField(key: "unitPrice", label: "ລາຄາຕໍ່ໜ່ວຍ (LAK)", kind: .decimal, required: true).half(),
+                EditorField(key: "supplierName", label: "ຜູ້ສະໜອງ", required: true).half(),
+                EditorField(key: "purchaseDate", label: "ວັນທີຊື້", kind: .date, required: true).half(),
                 EditorField(key: "note", label: "ໝາຍເຫດ", kind: .multiline)
-            ], initial: ["purchaseDate": businessDateString(Date())]) { values in
+            ], initial: ["purchaseDate": businessDateString(Date())], saveLabel: "ຮັບເຂົ້າສາງ", summary: { values in
+                guard let quantity = Decimal(string: values["quantity", default: ""]), let price = Decimal(string: values["unitPrice", default: ""]), quantity > 0, price >= 0 else { return nil }
+                return "ລວມ " + amountString(quantity * price)
+            }) { values in
                 var body = values
                 body["quantity"] = try canonicalDecimal(values["quantity"] ?? "", scale: 6)
                 body["unitPrice"] = try canonicalDecimal(values["unitPrice"] ?? "", scale: 4)
@@ -160,11 +163,11 @@ struct InventoryView: View {
                 await state.refresh()
             }
         } else if editor == "adjust", let row = selected {
-            NativeEditor(title: "ປັບຈຳນວນ · \(row.text("name"))", fields: [
-                EditorField(key: "quantityDelta", label: "ຈຳນວນປັບ (+ / −)", kind: .decimal, required: true, help: "ຄົງເຫຼືອ \(row.text("stock")) \(row.text("unit")) · ຄ່າລົບຈະຫັກອອກ"),
-                EditorField(key: "reason", label: "ເຫດຜົນ", kind: .choice([EditorChoice(id: "manual_correction", label: "ແກ້ຈຳນວນ"), EditorChoice(id: "damaged", label: "ເສຍຫາຍ"), EditorChoice(id: "expired", label: "ໝົດອາຍຸ"), EditorChoice(id: "other", label: "ອື່ນໆ")]), required: true),
+            NativeEditor(title: "ປັບຈຳນວນ · \(row.text("name"))", subtitle: "ຄົງເຫຼືອຕອນນີ້ \(row.text("stock")) \(row.text("unit")). ໃສ່ຄ່າບວກເພື່ອເພີ່ມ ຫຼືຄ່າລົບເພື່ອຫັກອອກ.", fields: [
+                EditorField(key: "quantityDelta", label: "ຈຳນວນປັບ (+ / −)", kind: .decimal, required: true, help: "ຕົວຢ່າງ: −2.5").half(),
+                EditorField(key: "reason", label: "ເຫດຜົນ", kind: .choice([EditorChoice(id: "manual_correction", label: "ແກ້ຈຳນວນ"), EditorChoice(id: "damaged", label: "ເສຍຫາຍ"), EditorChoice(id: "expired", label: "ໝົດອາຍຸ"), EditorChoice(id: "other", label: "ອື່ນໆ")]), required: true).half(),
                 EditorField(key: "note", label: "ລາຍລະອຽດ", kind: .multiline, required: true)
-            ]) { values in
+            ], saveLabel: "ບັນທຶກການປັບ") { values in
                 var body = values; body["rawMaterialId"] = row.id
                 body["quantityDelta"] = try canonicalDecimal(values["quantityDelta"] ?? "", scale: 6, allowNegative: true)
                 let result = try await model.mutate("/api/inventory/adjust", body: mgBody(body))
@@ -175,12 +178,12 @@ struct InventoryView: View {
             let stock = row.text("currentStock").isEmpty ? row.text("stock") : row.text("currentStock")
             let cost = row.text("avgCostPerUnit").isEmpty ? row.text("avgCost") : row.text("avgCostPerUnit")
             let minimum = row.text("minStockAlert").isEmpty ? row.text("minStock") : row.text("minStockAlert")
-            NativeEditor(title: "ແກ້ໄຂ · \(row.text("name"))", fields: [
-                EditorField(key: "name", label: "ຊື່", required: true),
-                EditorField(key: "stock", label: "ຈຳນວນກວດນັບ (\(row.text("unit")))", kind: .decimal, required: true),
-                EditorField(key: "minStock", label: "ຈຸດແຈ້ງເຕືອນ", kind: .decimal, required: true),
-                EditorField(key: "avgCostPerUnit", label: "ຕົ້ນທຶນ / ໜ່ວຍ", kind: .decimal, required: true),
-                EditorField(key: "stockReason", label: "ເຫດຜົນປ່ຽນຈຳນວນ", kind: .multiline, help: "ຕ້ອງໃສ່ເມື່ອຈຳນວນກວດນັບປ່ຽນ · ຖ້າສະຕັອກປ່ຽນຂະນະແກ້ໄຂ ຕ້ອງໂຫຼດຄືນ")
+            NativeEditor(title: "ແກ້ໄຂ · \(row.text("name"))", subtitle: "ໃຊ້ເມື່ອນັບສະຕັອກຈິງແລ້ວບໍ່ກົງ ຫຼືຕ້ອງແກ້ຕົ້ນທຶນ / ຈຸດແຈ້ງເຕືອນ.", fields: [
+                EditorField(key: "name", label: "ຊື່ວັດຖຸດິບ", required: true),
+                EditorField(key: "stock", label: "ຈຳນວນທີ່ນັບໄດ້ (\(row.text("unit")))", kind: .decimal, required: true).half(),
+                EditorField(key: "minStock", label: "ຈຸດແຈ້ງເຕືອນ", kind: .decimal, required: true, help: "ແຈ້ງເຕືອນເມື່ອຕ່ຳກວ່ານີ້").half(),
+                EditorField(key: "avgCostPerUnit", label: "ຕົ້ນທຶນ / ໜ່ວຍ (LAK)", kind: .decimal, required: true).half(),
+                EditorField(key: "stockReason", label: "ເຫດຜົນປ່ຽນຈຳນວນ", kind: .multiline, help: "ຕ້ອງໃສ່ເມື່ອຈຳນວນທີ່ນັບໄດ້ປ່ຽນ")
             ], initial: ["name": row.text("name"), "stock": stock, "minStock": minimum, "avgCostPerUnit": cost]) { values in
                 let normalized: [String: JSONValue] = [
                     "name": .string(values["name", default: ""].trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -220,14 +223,15 @@ private struct ManagementSheet<Content: View>: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(title).font(Theme.font(22, weight: .bold)); Spacer()
+                Text(title).font(Theme.font(22, weight: .bold)).foregroundStyle(Theme.evergreen); Spacer()
                 if busy { ProgressView().controlSize(.small).accessibilityLabel("ກຳລັງດຳເນີນການ") }
                 Button("ປິດ") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy).keyboardShortcut(.cancelAction)
-            }.padding(24)
+            }.padding(.horizontal, 24).padding(.top, 22).padding(.bottom, 16)
             Divider()
-            ScrollView { content.padding(24) }
+            // Labels above controls and one control height, as in the shared form.
+            ScrollView { content.padding(20).labeledContentStyle(StackedLabeledContentStyle()).textFieldStyle(.roundedBorder).controlSize(.large) }
         }
-        .frame(minWidth: 680, idealWidth: 800, minHeight: 480, idealHeight: 650)
+        .frame(minWidth: 680, idealWidth: 760, minHeight: 520, idealHeight: 760)
         .font(Theme.font()).background(Theme.cream)
         .interactiveDismissDisabled(dirty || busy)
         .confirmationDialog("ປິດແບບຟອມທີ່ຍັງບໍ່ບັນທຶກ?", isPresented: $confirmDiscard, titleVisibility: .visible) {
@@ -281,10 +285,10 @@ struct ProductionView: View {
         .sheet(isPresented: $planner) { ProductionPlannerSheet(model: model, data: state.data) { await state.refresh() } }
         .sheet(isPresented: $waste) {
             let available = state.data["adjustmentBatches"].array.filter { $0["quantityRemaining"].decimal > 0 }
-            NativeEditor(title: "ຫັກຂອງເສຍຈາກສາງກາງ", fields: [
+            NativeEditor(title: "ຫັກຂອງເສຍຈາກສາງກາງ", subtitle: "ສິນຄ້າຄົງເຫຼືອຈະຫຼຸດລົງ ແລະຕົ້ນທຶນຂອງເສຍຈະຖືກບັນທຶກໃນລາຍງານ.", fields: [
                 EditorField(key: "batchId", label: "ລັອດຜະລິດ", kind: .choice(available.map { EditorChoice(id: $0.id, label: "\($0.text("batchNumber")) · \($0.text("productName")) · ເຫຼືອ \($0.text("quantityRemaining"))") }), required: true),
-                EditorField(key: "quantity", label: "ຈຳນວນຫັກ (ຖ້ວຍ)", kind: .integer, required: true, help: "ສິນຄ້າຄົງເຫຼືອຈະຫຼຸດລົງ ແລະຕົ້ນທຶນຂອງເສຍຈະຖືກບັນທຶກ"),
-                EditorField(key: "reason", label: "ເຫດຜົນ", kind: .choice([EditorChoice(id: "expired", label: "ໝົດອາຍຸ"), EditorChoice(id: "damaged", label: "ເສຍຫາຍ"), EditorChoice(id: "sample", label: "ຕົວຢ່າງ"), EditorChoice(id: "other", label: "ອື່ນໆ")]), required: true),
+                EditorField(key: "quantity", label: "ຈຳນວນຫັກ (ຖ້ວຍ)", kind: .integer, required: true).half(),
+                EditorField(key: "reason", label: "ເຫດຜົນ", kind: .choice([EditorChoice(id: "expired", label: "ໝົດອາຍຸ"), EditorChoice(id: "damaged", label: "ເສຍຫາຍ"), EditorChoice(id: "sample", label: "ຕົວຢ່າງ"), EditorChoice(id: "other", label: "ອື່ນໆ")]), required: true).half(),
                 EditorField(key: "note", label: "ໝາຍເຫດ", kind: .multiline)
             ], saveLabel: "ຢືນຢັນຫັກສິນຄ້າ") { values in
                 let count = try mgPositiveInteger(values["quantity"] ?? "")
@@ -462,13 +466,13 @@ struct ExpensesView: View {
         .onChange(of: filter) { _, _ in page = 1; Task { await reload() } }
         .sheet(isPresented: $editor) { ExpenseEditorSheet(model: model, expenseId: expenseId) { await state.refresh() } }
         .sheet(isPresented: $categoryEditor) {
-            NativeEditor(title: "ປະເພດລາຍຈ່າຍໃໝ່", fields: [EditorField(key: "name", label: "ຊື່ປະເພດ", required: true)]) { values in
+            NativeEditor(title: "ປະເພດລາຍຈ່າຍໃໝ່", subtitle: "ປະເພດໃໝ່ຈະໃຊ້ໄດ້ທັນທີໃນແບບຟອມລາຍຈ່າຍ.", fields: [EditorField(key: "name", label: "ຊື່ປະເພດ", required: true, help: "ຕົວຢ່າງ: ຄ່ານ້ຳມັນ, ຄ່າແຮງງານ")], saveLabel: "ເພີ່ມປະເພດ") { values in
                 let result = try await model.mutate("/api/expense-categories", body: mgBody(values), durable: false)
                 model.showNotice("ເພີ່ມປະເພດແລ້ວ · \(result.text("category"))")
             }
         }
         .sheet(item: $voidExpense) { row in
-            NativeEditor(title: "ຍົກເລີກລາຍຈ່າຍ · \(row.text("category"))", fields: [EditorField(key: "reason", label: "ເຫດຜົນ", kind: .multiline, required: true, help: "ຈຳນວນ \(row.text("amount")) LAK ຈະຖືກຕັດອອກຈາກລາຍງານ. ປະຫວັດການຍົກເລີກຍັງຄົງຢູ່.")], saveLabel: "ຢືນຢັນຍົກເລີກລາຍຈ່າຍ") { values in
+            NativeEditor(title: "ຍົກເລີກລາຍຈ່າຍ · \(row.text("category"))", subtitle: "ຈຳນວນ \(row.text("amount")) LAK ຈະຖືກຕັດອອກຈາກລາຍງານ. ປະຫວັດການຍົກເລີກຍັງຄົງຢູ່.", fields: [EditorField(key: "reason", label: "ເຫດຜົນທີ່ຍົກເລີກ", kind: .multiline, required: true)], saveLabel: "ຢືນຢັນຍົກເລີກລາຍຈ່າຍ") { values in
                 _ = try await model.mutate("/api/expenses/\(row.id)", body: mgBody(values), method: "DELETE")
                 model.showNotice("ຍົກເລີກລາຍຈ່າຍແລ້ວ"); await state.refresh()
             }
@@ -515,6 +519,7 @@ private struct ExpenseEditorSheet: View {
     @State private var confirmReload = false
     @FocusState private var focusedField: String?
     @State private var showValidation = false
+    @State private var typingCategory = false
     private var draftKey: String { "expense.\(expenseId ?? "new")" }
     private var dirty: Bool { persistedId == nil && !submissionReconciled && (!baseline.isEmpty && fields != baseline || attachment != nil) }
     private func binding(_ key: String) -> Binding<String> { Binding(get: { fields[key, default: ""] }, set: { fields[key] = $0 }) }
@@ -560,29 +565,69 @@ private struct ExpenseEditorSheet: View {
             do { attachment = try result.get(); uploadedAttachment = nil } catch { self.error = error.localizedDescription }
         }
     }
+    private static let typedCategory = "__typed__"
+    private var categoryNames: [String] { categories.map { $0.text("name") } }
+    /// One menu for the category: known categories, or "type a new one", which reveals a text field.
+    private var categorySelection: Binding<String> {
+        Binding(get: {
+            let current = fields["category", default: ""]
+            return typingCategory || !categoryNames.contains(current) ? Self.typedCategory : current
+        }, set: { value in
+            if value == Self.typedCategory { typingCategory = true; if categoryNames.contains(fields["category", default: ""]) { fields["category"] = "" } }
+            else { typingCategory = false; fields["category"] = value }
+        })
+    }
     private var editContent: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
-                GridRow {
-                    VStack(alignment: .leading, spacing: 8) { Text("ປະເພດ *"); TextField("ພິມປະເພດ", text: binding("category")).accessibilityLabel("ປະເພດລາຍຈ່າຍ").focused($focusedField, equals: "category"); if showValidation && fields["category", default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Text("ກະລຸນາໃສ່ປະເພດ").foregroundStyle(Theme.danger).font(Theme.font(12)) }; if !categories.isEmpty { Menu("ເລືອກປະເພດທີ່ມີ") { ForEach(categories) { category in Button(category.text("name")) { fields["category"] = category.text("name") } } } } }
-                    VStack(alignment: .leading, spacing: 8) { Text("ຈຳນວນເງິນ (LAK) *"); TextField("0.00", text: binding("amount")).accessibilityLabel("ຈຳນວນເງິນ LAK").focused($focusedField, equals: "amount"); if showValidation && ((try? canonicalDecimal(fields["amount", default: ""])) == nil || (Decimal(string: fields["amount", default: ""]) ?? 0) <= 0) { Text("ຈຳນວນເງິນຕ້ອງຫຼາຍກວ່າ 0 ແລະລະອຽດບໍ່ເກີນ 2 ຕຳແໜ່ງ").foregroundStyle(Theme.danger).font(Theme.font(12)) }; Text("ທົດສະນິຍົມໄດ້ 2 ຕຳແໜ່ງ").font(Theme.font(12)).foregroundStyle(Theme.muted) }
-                }
-                GridRow {
-                    VStack(alignment: .leading, spacing: 8) { Text("ວັນທີ (YYYY-MM-DD) *"); TextField("YYYY-MM-DD", text: binding("incurredAt")).accessibilityLabel("ວັນທີລາຍຈ່າຍ").focused($focusedField, equals: "incurredAt"); if showValidation && !mgValidDate(fields["incurredAt", default: ""]) { Text("ວັນທີບໍ່ຖືກຕ້ອງ").foregroundStyle(Theme.danger).font(Theme.font(12)) } }
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("ຮ້ານ")
-                        Picker("ຮ້ານ", selection: binding("storeId")) { Text("ລາຍຈ່າຍກາງ").tag(""); if let id = fields["storeId"], !id.isEmpty, !stores.contains(where: { $0.id == id }) { Text(original.text("storeName") + " · ຮ້ານເດີມ").tag(id) }; ForEach(stores) { Text($0.text("name")).tag($0.id) } }.labelsHidden()
+        VStack(alignment: .leading, spacing: 14) {
+            FormCard("ລາຍຈ່າຍ") {
+                HStack(alignment: .top, spacing: 14) {
+                    expenseField("ປະເພດ", required: true, error: showValidation && fields["category", default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "ກະລຸນາເລືອກ ຫຼືພິມປະເພດ" : nil) {
+                        Picker("ປະເພດລາຍຈ່າຍ", selection: categorySelection) {
+                            ForEach(categoryNames, id: \.self) { Text($0).tag($0) }
+                            Divider()
+                            Text("ພິມປະເພດໃໝ່…").tag(Self.typedCategory)
+                        }.labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
+                        if categorySelection.wrappedValue == Self.typedCategory {
+                            TextField("ພິມຊື່ປະເພດໃໝ່", text: binding("category")).accessibilityLabel("ປະເພດລາຍຈ່າຍໃໝ່").focused($focusedField, equals: "category")
+                        }
+                    }
+                    expenseField("ຈຳນວນເງິນ (LAK)", required: true, help: "ທົດສະນິຍົມໄດ້ 2 ຕຳແໜ່ງ",
+                                 error: showValidation && ((try? canonicalDecimal(fields["amount", default: ""])) == nil || (Decimal(string: fields["amount", default: ""]) ?? 0) <= 0) ? "ຈຳນວນເງິນຕ້ອງຫຼາຍກວ່າ 0 ແລະລະອຽດບໍ່ເກີນ 2 ຕຳແໜ່ງ" : nil) {
+                        TextField("0.00", text: binding("amount")).accessibilityLabel("ຈຳນວນເງິນ LAK").focused($focusedField, equals: "amount")
                     }
                 }
-            }.textFieldStyle(.roundedBorder).controlSize(.large)
-            VStack(alignment: .leading, spacing: 8) { Text("ໝາຍເຫດ"); TextEditor(text: binding("note")).accessibilityLabel("ໝາຍເຫດ").frame(height: 90).padding(8).background(Theme.surface).overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border)) }
-            HStack {
-                Button("ແນບໃບເສັດ / ຫຼັກຖານ", systemImage: "paperclip") { importing = true }
-                if let attachment { Text(attachment.lastPathComponent).lineLimit(1); Button("ເອົາໄຟລ໌ໃໝ່ອອກ") { self.attachment = nil; uploadedAttachment = nil } }
-                else if !fields["receiptUrl", default: ""].isEmpty { Button("ເບິ່ງຫຼັກຖານເດີມ") { Task { await openReceipt() } } }
-            }.controlSize(.large)
-            Text("JPEG, PNG, WebP ຫຼື PDF · ໃບເສັດຈະຖືກອັບໂຫຼດເມື່ອຢືນຢັນບັນທຶກ").font(Theme.font(12)).foregroundStyle(Theme.muted)
+                HStack(alignment: .top, spacing: 14) {
+                    expenseField("ວັນທີ", required: true, error: showValidation && !mgValidDate(fields["incurredAt", default: ""]) ? "ວັນທີບໍ່ຖືກຕ້ອງ" : nil) {
+                        DateOnlyPicker(label: "ວັນທີລາຍຈ່າຍ", text: binding("incurredAt"))
+                    }
+                    expenseField("ຮ້ານ", help: "ເລືອກ “ລາຍຈ່າຍກາງ” ຖ້າບໍ່ແມ່ນຂອງຮ້ານໃດ") {
+                        Picker("ຮ້ານ", selection: binding("storeId")) { Text("ລາຍຈ່າຍກາງ").tag(""); if let id = fields["storeId"], !id.isEmpty, !stores.contains(where: { $0.id == id }) { Text(original.text("storeName") + " · ຮ້ານເດີມ").tag(id) }; ForEach(stores) { Text($0.text("name")).tag($0.id) } }
+                            .labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            FormCard("ໝາຍເຫດ ແລະຫຼັກຖານ") {
+                TextEditor(text: binding("note")).accessibilityLabel("ໝາຍເຫດ").font(Theme.font()).scrollContentBackground(.hidden).frame(height: 80).padding(6)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6)).overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border))
+                HStack {
+                    Button("ແນບໃບເສັດ / ຫຼັກຖານ", systemImage: "paperclip") { importing = true }
+                    if let attachment { Label(attachment.lastPathComponent, systemImage: "doc").lineLimit(1); Button("ເອົາອອກ") { self.attachment = nil; uploadedAttachment = nil } }
+                    else if !fields["receiptUrl", default: ""].isEmpty { Button("ເບິ່ງຫຼັກຖານເດີມ") { Task { await openReceipt() } } }
+                }
+                Text("JPEG, PNG, WebP ຫຼື PDF · ໃບເສັດຈະຖືກອັບໂຫຼດເມື່ອຢືນຢັນບັນທຶກ").font(Theme.font(12)).foregroundStyle(Theme.muted)
+            }
         }.disabled(busy)
+    }
+    private func expenseField<Content: View>(_ label: String, required: Bool = false, help: String = "", error: String? = nil, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 3) {
+                Text(label).font(Theme.font(13, weight: .semibold)).foregroundStyle(error == nil ? Theme.ink : Theme.danger)
+                if required { Text("*").font(Theme.font(13, weight: .bold)).foregroundStyle(Theme.danger).accessibilityHidden(true) }
+            }
+            content()
+            if let error { Text(error).font(Theme.font(12)).foregroundStyle(Theme.danger) }
+            else if !help.isEmpty { Text(help).font(Theme.font(12)).foregroundStyle(Theme.muted) }
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
     private var reviewContent: some View {
         ManagementPanel("ກວດລາຍຈ່າຍກ່ອນບັນທຶກ", color: Theme.mango) {
@@ -870,12 +915,12 @@ private func managementActiveField() -> EditorField {
     EditorField(key: "isActive", label: "ສະຖານະ", kind: .choice([EditorChoice(id: "true", label: "ເປີດໃຊ້"), EditorChoice(id: "false", label: "ປິດໃຊ້")]), required: true)
 }
 private func productFields(editing: Bool) -> [EditorField] {
-    let fields = [EditorField(key: "code", label: "ລະຫັດ", required: true), EditorField(key: "name", label: "ຊື່ສິນຄ້າ", required: true), EditorField(key: "sizeDescription", label: "ຂະໜາດ"), EditorField(key: "retailPrice", label: "ລາຄາຂາຍ (LAK)", kind: .money, required: true), EditorField(key: "shelfLifeDays", label: "ອາຍຸ (ມື້)", kind: .integer, required: true)]
-    return fields + (editing ? [managementActiveField()] : [])
+    let fields = [EditorField(key: "name", label: "ຊື່ສິນຄ້າ", required: true), EditorField(key: "code", label: "ລະຫັດ", required: true, help: "ຕົວຢ່າງ: YG-CHS-74").half(), EditorField(key: "sizeDescription", label: "ຂະໜາດ", help: "ຕົວຢ່າງ: 74 ml").half(), EditorField(key: "retailPrice", label: "ລາຄາຂາຍ (LAK)", kind: .money, required: true).half(), EditorField(key: "shelfLifeDays", label: "ອາຍຸສິນຄ້າ (ມື້)", kind: .integer, required: true).half()]
+    return fields + (editing ? [managementActiveField().half()] : [])
 }
 private func materialFields(editing: Bool) -> [EditorField] {
-    let fields = [EditorField(key: "code", label: "ລະຫັດ", required: true), EditorField(key: "name", label: "ຊື່ວັດຖຸດິບ", required: true), EditorField(key: "category", label: "ປະເພດ", kind: .choice([EditorChoice(id: "ingredient", label: "ສ່ວນປະກອບ"), EditorChoice(id: "packaging", label: "ບັນຈຸພັນ")]), required: true), EditorField(key: "unit", label: "ໜ່ວຍ", required: true, help: "ປ່ຽນໜ່ວຍໄດ້ສະເພາະວັດຖຸດິບທີ່ບໍ່ມີສະຕັອກ ຫຼືປະຫວັດ"), EditorField(key: "minStock", label: "ຈຸດແຈ້ງເຕືອນ", kind: .decimal, required: true), EditorField(key: "avgCostPerUnit", label: "ຕົ້ນທຶນ / ໜ່ວຍ", kind: .decimal, required: true)]
-    return fields + (editing ? [managementActiveField()] : [])
+    let fields = [EditorField(key: "name", label: "ຊື່ວັດຖຸດິບ", required: true), EditorField(key: "code", label: "ລະຫັດ", required: true, help: "ຕົວຢ່າງ: RM-SUGAR").half(), EditorField(key: "category", label: "ປະເພດ", kind: .choice([EditorChoice(id: "ingredient", label: "ສ່ວນປະກອບ"), EditorChoice(id: "packaging", label: "ບັນຈຸພັນ")]), required: true).half(), EditorField(key: "unit", label: "ໜ່ວຍ", required: true, help: "ປ່ຽນໄດ້ສະເພາະເມື່ອຍັງບໍ່ມີສະຕັອກ").half(), EditorField(key: "minStock", label: "ຈຸດແຈ້ງເຕືອນ", kind: .decimal, required: true).half(), EditorField(key: "avgCostPerUnit", label: "ຕົ້ນທຶນ / ໜ່ວຍ (LAK)", kind: .decimal, required: true).half()]
+    return fields + (editing ? [managementActiveField().half()] : [])
 }
 
 private struct RecipeEditorSheet: View {
@@ -914,6 +959,8 @@ private struct RecipeEditorSheet: View {
                                 Toggle(material.text("name") + (material["isActive"].bool ? "" : " · ປິດໃຊ້"), isOn: Binding(get: { quantities[material.id] != nil }, set: { if $0 { quantities[material.id] = "1" } else { quantities.removeValue(forKey: material.id) } })).frame(maxWidth: .infinity, alignment: .leading)
                                 if quantities[material.id] != nil { TextField("ຈຳນວນ", text: Binding(get: { quantities[material.id, default: ""] }, set: { quantities[material.id] = $0 })).textFieldStyle(.roundedBorder).accessibilityLabel("ຈຳນວນ \(material.text("name"))").frame(width: 150); Text(material.text("unit")).frame(width: 70, alignment: .leading) }
                             }.controlSize(.large).disabled(busy || result != nil || submissionReconciled)
+                            // A checkbox keeps its name beside it, not stacked like the form labels.
+                            .toggleStyle(.checkbox).labeledContentStyle(.automatic)
                         }
                     }
                     Text("ການບັນທຶກຈະສ້າງສະບັບໃໝ່ ແລະຕັ້ງເປັນສູດຫຼັກສຳລັບການຜະລິດຕໍ່ໄປ. ລັອດເກົ່າຍັງໃຊ້ສູດເກົ່າ.").foregroundStyle(Theme.muted)

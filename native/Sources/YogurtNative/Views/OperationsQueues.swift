@@ -10,6 +10,7 @@ struct MapWorkspaceView: View {
     @State private var listOnly = false
     @State private var camera = StreetMapDefaults.region(around: [])
     @State private var cameraID = 0
+    @AppStorage("mapTileStyle") private var style: MapTileStyle = .street
     @State private var detail: JSONValue?
     /// Every store, so stores without coordinates (absent from the map data) can be placed.
     @StateObject private var directory = FeatureState()
@@ -59,8 +60,9 @@ struct MapWorkspaceView: View {
                                 if let selected { selectedStore(selected) }
                             }.frame(minWidth: 280, idealWidth: listOnly ? 700 : 320, maxWidth: listOnly ? .infinity : 420)
                             if !listOnly {
-                                StreetMapView(pins: pins, selection: $selection, camera: camera, cameraID: cameraID)
-                                    .overlay(alignment: .bottomLeading) { StreetMapAttribution() }
+                                StreetMapView(pins: pins, selection: $selection, camera: camera, cameraID: cameraID, style: style)
+                                    .overlay(alignment: .bottomLeading) { StreetMapAttribution(style: style) }
+                                    .overlay(alignment: .topTrailing) { MapStyleSwitch(style: $style) }
                                     .frame(minWidth: 330, minHeight: 430).clipShape(RoundedRectangle(cornerRadius: 10))
                                     .accessibilityLabel("ແຜນທີ່ຮ້ານ. ໃຊ້ລາຍການຮ້ານຄຽງຂ້າງໄດ້.")
                             }
@@ -198,32 +200,60 @@ struct OperationsRefillEditor: View {
     private var products: [JSONValue] { catalog.data["products"].array }
     private var stores: [JSONValue] { catalog.data["stores"].array.filter { $0["fridgeId"] != .null } }
     private var dirty: Bool { !note.isEmpty || quantities.values.contains { !$0.isEmpty && $0 != "0" } }
+    private var totalCups: Int { products.reduce(0) { $0 + (Int(quantities[$1.id] ?? "") ?? 0) } }
+    private func quantity(_ product: JSONValue) -> Binding<Int> {
+        Binding(get: { Int(quantities[product.id] ?? "") ?? 0 }, set: { quantities[product.id] = String(max(0, min($0, 100000))) })
+    }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("ສ້າງຄຳຂໍເຕີມສິນຄ້າ").font(Theme.font(23, weight: .bold))
-            ReadStateView(state: catalog) {
-                Form {
-                    Picker("ຮ້ານ", selection: $selectedStore) {
-                        Text("ເລືອກຮ້ານ").tag("")
-                        ForEach(stores) { row in Text(row.text("name")).tag(row.id) }
-                    }
-                    Section("ຈຳນວນຕາມສິນຄ້າ") {
-                        ForEach(products) { product in
-                            TextField(product.text("name") + " (ຖ້ວຍ)", text: Binding(get: { quantities[product.id] ?? "0" }, set: { quantities[product.id] = $0 }))
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("ສ້າງຄຳຂໍເຕີມສິນຄ້າ").font(Theme.font(22, weight: .bold)).foregroundStyle(Theme.evergreen)
+                Text("ເລືອກຮ້ານ ແລະໃສ່ຈຳນວນຖ້ວຍທີ່ຈະສົ່ງ. ສິນຄ້າຈະເຂົ້າຕູ້ເມື່ອກົດ “ສົ່ງແລ້ວ” ໃນລາຍການເຕີມ.").font(Theme.font(13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            }.padding(.horizontal, 24).padding(.top, 22).padding(.bottom, 16)
+            Divider()
+            ScrollView {
+                ReadStateView(state: catalog, showsFreshness: false) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        FormCard("ຮ້ານ") {
+                            Picker("ຮ້ານທີ່ຈະເຕີມ", selection: $selectedStore) {
+                                Text("ເລືອກຮ້ານ…").tag("")
+                                ForEach(stores) { row in Text(row.text("name")).tag(row.id) }
+                            }.labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
+                            if stores.isEmpty { Text("ຍັງບໍ່ມີຮ້ານທີ່ມີຕູ້ແຊ່").font(Theme.font(12)).foregroundStyle(Theme.muted) }
+                        }
+                        FormCard("ຈຳນວນທີ່ຈະສົ່ງ") {
+                            ForEach(products) { product in
+                                HStack(spacing: 12) {
+                                    Text(product.text("name")).font(Theme.font(14, weight: .medium))
+                                    Spacer()
+                                    TextField("0", value: quantity(product), format: .number).multilineTextAlignment(.trailing).frame(width: 90).accessibilityLabel(product.text("name") + " ຖ້ວຍ")
+                                    Stepper("", value: quantity(product), in: 0...100000, step: 1).labelsHidden()
+                                    Text("ຖ້ວຍ").foregroundStyle(Theme.muted)
+                                }
+                                if product.id != products.last?.id { Divider() }
+                            }
+                            HStack { Text("ລວມ").font(Theme.font(14, weight: .bold)); Spacer(); Text("\(totalCups) ຖ້ວຍ").font(Theme.font(15, weight: .bold)).monospacedDigit() }.padding(.top, 4)
+                        }
+                        FormCard("ໝາຍເຫດ") {
+                            TextEditor(text: $note).font(Theme.font()).scrollContentBackground(.hidden).frame(height: 64).padding(6)
+                                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6)).overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border))
                         }
                     }
-                    TextField("ໝາຍເຫດ", text: $note, axis: .vertical).lineLimit(3...5)
-                }.formStyle(.grouped).disabled(busy || submitted != nil)
-            }
-            if let error { OperationsIssue(text: error) }
-            if submitted != nil { Text("ຄຳຂໍຖືກເກັບໄວ້ແລ້ວ. ລອງຄຳຂໍເດີມເພື່ອຢືນຢັນຜົນ.").foregroundStyle(Theme.muted) }
-            HStack {
-                Button("ຍົກເລີກ", role: .cancel) { if dirty || submitted != nil { discard = true } else { dismiss() } }.disabled(busy)
-                Spacer()
-                Button(submitted == nil ? "ສ້າງຄຳຂໍ" : "ລອງຄຳຂໍເດີມ") { Task { await save() } }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(busy || !model.canWrite || catalog.source != "database" || selectedStore.isEmpty)
-                if busy { ProgressView().controlSize(.small) }
-            }
-        }.padding(24).frame(width: 620, height: 640).font(Theme.font())
+                }.padding(20).disabled(busy || submitted != nil)
+            }.textFieldStyle(.roundedBorder).controlSize(.large)
+            Divider()
+            VStack(alignment: .leading, spacing: 10) {
+                if let error { OperationsIssue(text: error) }
+                if submitted != nil { Text("ຄຳຂໍຖືກເກັບໄວ້ແລ້ວ. ລອງຄຳຂໍເດີມເພື່ອຢືນຢັນຜົນ.").foregroundStyle(Theme.muted) }
+                HStack {
+                    Button("ຍົກເລີກ", role: .cancel) { if dirty || submitted != nil { discard = true } else { dismiss() } }.disabled(busy)
+                    Spacer()
+                    if busy { ProgressView().controlSize(.small) }
+                    Button(submitted == nil ? "ສ້າງຄຳຂໍ" : "ລອງຄຳຂໍເດີມ") { Task { await save() } }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                        .disabled(busy || !model.canWrite || catalog.source != "database" || selectedStore.isEmpty || (submitted == nil && totalCups == 0))
+                }.controlSize(.large)
+            }.padding(.horizontal, 24).padding(.vertical, 16)
+        }.frame(width: 620, height: 640).font(Theme.font()).background(Theme.cream)
         .interactiveDismissDisabled(dirty || busy || submitted != nil)
         .task { await catalog.load(model, "catalog"); selectedStore = storeId ?? "" }
         .confirmationDialog("ປິດຄຳຂໍນີ້?", isPresented: $discard, titleVisibility: .visible) {

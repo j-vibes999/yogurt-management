@@ -151,17 +151,23 @@ struct OperationsStoreEditor: View {
     let store: JSONValue?
     var fields: [EditorField] {
         var result = [
-            EditorField(key: "name", label: "ຊື່ຮ້ານ", required: true),
-            EditorField(key: "contactName", label: "ຜູ້ຕິດຕໍ່"), EditorField(key: "phone", label: "ເບີໂທ"),
-            EditorField(key: "whatsapp", label: "WhatsApp"), EditorField(key: "facebook", label: "Facebook"),
+            EditorField(key: "name", label: "ຊື່ຮ້ານ", required: true).inSection("ຂໍ້ມູນຮ້ານ"),
+            EditorField(key: "contactName", label: "ຜູ້ຕິດຕໍ່").half(), EditorField(key: "phone", label: "ເບີໂທ").half(),
+            EditorField(key: "whatsapp", label: "WhatsApp", help: "ວ່າງໄວ້ ຈະໃຊ້ເບີໂທ").half(), EditorField(key: "facebook", label: "Facebook").half(),
             EditorField(key: "address", label: "ທີ່ຢູ່", kind: .multiline),
-            EditorField(key: "latitude", label: "ຕຳແໜ່ງຮ້ານໃນແຜນທີ່", kind: .location(longitudeKey: "longitude"), help: "ກົດ “ປັກໝຸດໃນແຜນທີ່” ຫຼືພິມເສັ້ນຂະໜານ (−90 ຫາ 90) ແລະເສັ້ນແວງ (−180 ຫາ 180)"),
-            EditorField(key: "commissionPercent", label: "ສ່ວນແບ່ງຮ້ານ (%)", kind: .money, required: true, help: "0–100%"),
-            EditorField(key: "monthlyElectricity", label: "ຄ່າໄຟ/ເດືອນ (LAK)", kind: .money, required: true),
-            EditorField(key: "fridgeStartDate", label: "ວັນທີເລີ່ມໃຊ້ຕູ້", kind: .date)
+            EditorField(key: "latitude", label: "ຕຳແໜ່ງໃນແຜນທີ່", kind: .location(longitudeKey: "longitude"), help: "ກົດປັກໝຸດ ແລ້ວເລືອກຈຸດທີ່ຮ້ານຕັ້ງຢູ່. ຫຼືພິມເສັ້ນຂະໜານ / ເສັ້ນແວງເອງ.").inSection("ຕຳແໜ່ງຮ້ານ"),
+            EditorField(key: "commissionPercent", label: "ສ່ວນແບ່ງຮ້ານ (%)", kind: .money, required: true, help: "0–100").inSection("ສ່ວນແບ່ງ ແລະຄ່າໃຊ້ຈ່າຍ").half(),
+            EditorField(key: "monthlyElectricity", label: "ຄ່າໄຟ / ເດືອນ (LAK)", kind: .money, required: true).half(),
         ]
         if store == nil {
-            result += [EditorField(key: "assetCode", label: "ລະຫັດຕູ້ແຊ່", required: true), EditorField(key: "fridgeModel", label: "ຮຸ່ນຕູ້ແຊ່"), EditorField(key: "serialNo", label: "ເລກເຄື່ອງ"), EditorField(key: "capacityCups", label: "ຄວາມຈຸ (ຖ້ວຍ)", kind: .integer, required: true)]
+            result += [
+                EditorField(key: "assetCode", label: "ລະຫັດຕູ້ແຊ່", required: true).inSection("ຕູ້ແຊ່").half(),
+                EditorField(key: "capacityCups", label: "ຄວາມຈຸ (ຖ້ວຍ)", kind: .integer, required: true).half(),
+                EditorField(key: "fridgeModel", label: "ຮຸ່ນຕູ້ແຊ່").half(), EditorField(key: "serialNo", label: "ເລກເຄື່ອງ").half(),
+                EditorField(key: "fridgeStartDate", label: "ວັນທີເລີ່ມໃຊ້ຕູ້", kind: .date).half(),
+            ]
+        } else {
+            result.append(EditorField(key: "fridgeStartDate", label: "ວັນທີເລີ່ມໃຊ້ຕູ້", kind: .date).inSection("ຕູ້ແຊ່").half())
         }
         return result
     }
@@ -173,7 +179,9 @@ struct OperationsStoreEditor: View {
         return values
     }
     var body: some View {
-        NativeEditor(title: store == nil ? "ເພີ່ມຮ້ານ ແລະຕູ້ແຊ່" : "ແກ້ໄຂຮ້ານ", fields: fields, initial: initial) { values in
+        NativeEditor(title: store == nil ? "ເພີ່ມຮ້ານ ແລະຕູ້ແຊ່" : "ແກ້ໄຂຮ້ານ · \(store?.text("name") ?? "")",
+                     subtitle: store == nil ? "ໃສ່ຂໍ້ມູນຮ້ານ ແລະຕູ້ແຊ່ທີ່ຕັ້ງຢູ່ຮ້ານ. ສິ່ງທີ່ບໍ່ຮູ້ ເວັ້ນໄວ້ແລ້ວແກ້ພາຍຫຼັງໄດ້." : "ປ່ຽນຂໍ້ມູນຕິດຕໍ່, ຕຳແໜ່ງ ຫຼືສ່ວນແບ່ງຂອງຮ້ານ.",
+                     fields: fields, initial: initial, saveLabel: store == nil ? "ເພີ່ມຮ້ານ" : "ບັນທຶກ") { values in
             let percentText = try canonicalDecimal(values["commissionPercent"] ?? "", scale: 2)
             let percent = Decimal(string: percentText) ?? 0
             guard percent <= 100 else { throw OperationsError(message: "ສ່ວນແບ່ງຕ້ອງຢູ່ລະຫວ່າງ 0–100%") }

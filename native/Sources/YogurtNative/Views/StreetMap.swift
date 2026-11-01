@@ -1,7 +1,32 @@
 import SwiftUI
 import MapKit
 
-/// OpenStreetMap street tiles, the same source the web map uses (src/components/store-map.tsx).
+/// The two tile sources of the web map (src/components/store-map.tsx): OSM streets and Esri imagery.
+enum MapTileStyle: String, CaseIterable, Identifiable {
+    case street, satellite
+    var id: String { rawValue }
+    var title: String { self == .street ? "ແຜນທີ່" : "ດາວທຽມ" }
+    var symbol: String { self == .street ? "map" : "globe.asia.australia" }
+    var template: String {
+        self == .street ? "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+            : "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+    }
+    var attribution: String { self == .street ? "© OpenStreetMap contributors" : "Tiles © Esri" }
+}
+
+/// Small switch over a map between the street map and satellite imagery.
+struct MapStyleSwitch: View {
+    @Binding var style: MapTileStyle
+    var body: some View {
+        Picker("ຮູບແບບແຜນທີ່", selection: $style) {
+            ForEach(MapTileStyle.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
+        }
+        .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.regular)
+        .padding(4).background(.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 8)).shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+        .padding(10).help("ສະລັບແຜນທີ່ ແລະພາບດາວທຽມ")
+    }
+}
+
 final class StreetTileOverlay: MKTileOverlay {
     // OSM's tile policy asks for an identifying User-Agent and local caching.
     private static let session: URLSession = {
@@ -11,8 +36,10 @@ final class StreetTileOverlay: MKTileOverlay {
         configuration.requestCachePolicy = .returnCacheDataElseLoad
         return URLSession(configuration: configuration)
     }()
-    init() {
-        super.init(urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png")
+    let style: MapTileStyle
+    init(style: MapTileStyle) {
+        self.style = style
+        super.init(urlTemplate: style.template)
         canReplaceMapContent = true; minimumZ = 2; maximumZ = 19
     }
     override func loadTile(at path: MKTileOverlayPath, result: @escaping (Data?, Error?) -> Void) {
@@ -50,6 +77,7 @@ struct StreetMapView: NSViewRepresentable {
     @Binding var selection: String?
     var camera: MKCoordinateRegion
     var cameraID: Int
+    var style: MapTileStyle = .street
     var onPick: ((CLLocationCoordinate2D) -> Void)? = nil
     var onCenterChange: ((CLLocationCoordinate2D) -> Void)? = nil
 
@@ -57,7 +85,7 @@ struct StreetMapView: NSViewRepresentable {
     func makeNSView(context: Context) -> MKMapView {
         let map = PickingMapView()
         map.delegate = context.coordinator
-        map.addOverlay(StreetTileOverlay(), level: .aboveLabels)
+        map.addOverlay(StreetTileOverlay(style: style), level: .aboveLabels)
         map.showsCompass = true; map.showsScale = true; map.showsZoomControls = true
         map.pointOfInterestFilter = .excludingAll
         map.setRegion(camera, animated: false)
@@ -68,6 +96,9 @@ struct StreetMapView: NSViewRepresentable {
     }
     func updateNSView(_ map: MKMapView, context: Context) {
         context.coordinator.parent = self
+        if let current = map.overlays.compactMap({ $0 as? StreetTileOverlay }).first, current.style != style {
+            map.removeOverlay(current); map.addOverlay(StreetTileOverlay(style: style), level: .aboveLabels)
+        }
         sync(map, context: context)
         if context.coordinator.cameraID != cameraID { context.coordinator.cameraID = cameraID; map.setRegion(camera, animated: true) }
     }
@@ -136,10 +167,11 @@ final class PickingMapView: MKMapView {
     }
 }
 
-/// Attribution required by OpenStreetMap's licence.
+/// Attribution required by the tile providers' terms.
 struct StreetMapAttribution: View {
+    var style: MapTileStyle = .street
     var body: some View {
-        Text("© OpenStreetMap contributors").font(.system(size: 10)).foregroundStyle(Theme.ink)
+        Text(style.attribution).font(.system(size: 10)).foregroundStyle(Theme.ink)
             .padding(.horizontal, 6).padding(.vertical, 2).background(.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 4)).padding(6)
     }
 }
@@ -155,6 +187,7 @@ struct StoreLocationPicker: View {
     @State private var camera = MKCoordinateRegion(center: StreetMapDefaults.center, span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08))
     @State private var cameraID = 0
     @State private var center = StreetMapDefaults.center
+    @AppStorage("mapTileStyle") private var style: MapTileStyle = .street
     @State private var query = ""
     @State private var results: [AppModel.PlaceResult] = []
     @State private var searching = false
@@ -179,12 +212,13 @@ struct StoreLocationPicker: View {
                     }
                 }.background(Theme.surface).tableSurface()
             }
-            StreetMapView(pins: pins, selection: .constant(nil), camera: camera, cameraID: cameraID, onPick: { choose($0, zoom: nil) }, onCenterChange: { center = $0 })
-                .overlay { Image(systemName: "plus").font(.system(size: 16, weight: .light)).foregroundStyle(Theme.ink.opacity(0.6)).allowsHitTesting(false).accessibilityHidden(true) }
-                .overlay(alignment: .bottomLeading) { StreetMapAttribution() }
-                .overlay(alignment: .topTrailing) {
+            StreetMapView(pins: pins, selection: .constant(nil), camera: camera, cameraID: cameraID, style: style, onPick: { choose($0, zoom: nil) }, onCenterChange: { center = $0 })
+                .overlay { Image(systemName: "plus").font(.system(size: 16, weight: .light)).foregroundStyle(style == .street ? Theme.ink.opacity(0.6) : .white).allowsHitTesting(false).accessibilityHidden(true) }
+                .overlay(alignment: .bottomLeading) { StreetMapAttribution(style: style) }
+                .overlay(alignment: .topTrailing) { MapStyleSwitch(style: $style) }
+                .overlay(alignment: .bottom) {
                     Button { choose(center, zoom: nil) } label: { Label("ປັກໝຸດກາງແຜນທີ່", systemImage: "scope") }
-                        .buttonStyle(.borderedProminent).controlSize(.regular).padding(10)
+                        .buttonStyle(.borderedProminent).controlSize(.large).padding(.bottom, 14)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
                 .frame(minHeight: 380)
