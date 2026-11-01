@@ -2,7 +2,7 @@ import XCTest
 @testable import YogurtNative
 
 final class SwiftCredentialsTests: XCTestCase {
-    private let secret = "foundation-secret-0123456789abcdef"
+    private let secret = "foundation-secret-0123456789abcdef" // gitleaks:allow (test vector, not a deployed secret)
     private let passwordHash = "scrypt$MDEyMzQ1Njc4OWFiY2RlZg$JKX9sg33COVjGDXgg5hHjkgkWXtZ8BJV8ls_x-OVe1sQOjPnfEOuSPOXczMQD2gpTFr4M7lnjGVenqNsJKrmpg"
     private let tag = "CwurDFbSKnQMAtEfgAepeTwbSh4Mg8vp1UOfnDREfrI"
     private let token = "eyJ1c2VySWQiOiJ1c2VyLTEiLCJzaWQiOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwiZW1haWwiOiJhQGV4YW1wbGUudGVzdCIsImZ1bGxOYW1lIjoi4LqE4Lq74LqZIC8gXCJBXCIiLCJyb2xlIjoiYWRtaW4iLCJjcmVkZW50aWFsVGFnIjoiQ3d1ckRGYlNLblFNQXRFZmdBZXBlVHdiU2g0TWc4dnAxVU9mbkRSRWZySSIsImV4cCI6MjAwMDAwMDAwMH0.TRtMGKN8lkBBzv0g9Yc7TVBLu7s1fAfhGsvANkkA_M8"

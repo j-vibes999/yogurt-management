@@ -1,0 +1,13 @@
+# Reviewed gitleaks false positives (verified 2026-11-01). Each entry names why it is not a secret.
+# fixed HMAC test vector proving Swift/Node session compatibility; not a deployed secret
+beda6425063c261b65cc884db0bfeafc9ff6cbc9:native/Tests/YogurtNativeTests/SwiftCredentialsTests.swift:generic-api-key:5
+# SHA-256 checksum of a Prisma migration file recorded for history reconciliation
+3511878f4b47b5da379442f38ea4e61e27c10a11:prisma/migrations/20261028092000_reconcile_recovered_history/migration.sql:generic-api-key:12
+# SHA-256 checksum of a Prisma migration file recorded for history reconciliation
+3511878f4b47b5da379442f38ea4e61e27c10a11:tests/migration-history.test.mjs:generic-api-key:26
+# random UUID idempotency key used as test data
+fd204edcf8d9117641853b43595f71e8e6effadf:tests/operation-request.test.mjs:generic-api-key:79
+# random UUID idempotency key used as test data
+fd204edcf8d9117641853b43595f71e8e6effadf:tests/operation-request.test.mjs:generic-api-key:80
+# random UUID idempotency key used as test data
+fd204edcf8d9117641853b43595f71e8e6effadf:tests/pending-request.test.mjs:generic-api-key:5
