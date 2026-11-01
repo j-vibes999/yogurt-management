@@ -31,6 +31,7 @@ struct SwiftDatabaseOptions: Sendable {
     let poolTimeout: Int
     let statementTimeout: Int
     let requiresTLS: Bool
+    let transactionPooling: Bool
     var verifiesCertificateAndHostname: Bool { tlsConfiguration.certificateVerification == .fullVerification }
     let tlsConfiguration: TLSConfiguration
     let tlsServerName: String
@@ -40,6 +41,8 @@ struct SwiftDatabaseOptions: Sendable {
         catch { throw SwiftDatabaseError("invalid_configuration") }
         guard let url = URLComponents(string: configuration.databaseURL), let host = url.host, let username = url.user else { throw SwiftDatabaseError("invalid_configuration") }
         let query = Dictionary(uniqueKeysWithValues: (url.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        guard query["pgbouncer"] == nil || ["true", "false"].contains(query["pgbouncer"]!) else { throw SwiftDatabaseError("invalid_configuration") }
+        transactionPooling = url.port == 6543 || query["pgbouncer"] == "true"
         func bounded(_ name: String, default fallback: Int, maximum: Int) throws -> Int {
             guard let text = query[name] else { return fallback }
             guard text.range(of: "^[0-9]+$", options: .regularExpression) != nil, let number = Int(text), (1...maximum).contains(number) else { throw SwiftDatabaseError("invalid_configuration") }
@@ -82,13 +85,27 @@ private actor SwiftSQLLease {
     private var active = true
     private var busy = false
     private var failure: SwiftDatabaseError?
+    private var drainWaiters: [CheckedContinuation<Void, Never>] = []
     init(_ connection: PostgresConnection, timeout: Int) { self.connection = connection; self.timeout = timeout }
-    func invalidate() { active = false }
-    func finish() throws { active = false; if let failure { throw failure } }
+    func invalidate() async {
+        // Seal before suspending: captured leases cannot start another query during drain.
+        active = false
+        if busy { await withCheckedContinuation { drainWaiters.append($0) } }
+    }
+    func finish() async throws {
+        // The driver's statement deadline/watchdog also bounds an orphaned operation here.
+        await invalidate()
+        if let failure { throw failure }
+    }
     func perform(_ sql: String, _ values: [JSONValue], read: Bool) async throws -> [JSONValue] {
         guard active else { throw SwiftDatabaseError("connection_released") }
         guard !busy else { throw SwiftDatabaseError("connection_busy") }
-        busy = true; defer { busy = false }
+        busy = true
+        defer {
+            busy = false
+            let waiters = drainWaiters; drainWaiters.removeAll()
+            for waiter in waiters { waiter.resume() }
+        }
         do { return try await SwiftSQLDriver.run(connection, sql, values, read: read, timeout: timeout) }
         catch let error as SwiftDatabaseError { failure = error; throw error }
     }
@@ -120,12 +137,18 @@ actor SwiftDatabase {
     }
     func rows(_ sql: String, _ values: [JSONValue] = []) async throws -> [JSONValue] {
         try ensureRunning()
+        if options.transactionPooling {
+            return try await transaction { try await $0.rows(sql, values) }
+        }
         return try await withConnection { connection in
             try await SwiftSQLDriver.run(connection, sql, values, read: true, timeout: self.options.statementTimeout)
         }
     }
     func execute(_ sql: String, _ values: [JSONValue] = []) async throws {
         try ensureRunning()
+        if options.transactionPooling {
+            return try await transaction { try await $0.execute(sql, values) }
+        }
         _ = try await withConnection { connection in
             try await SwiftSQLDriver.run(connection, sql, values, read: false, timeout: self.options.statementTimeout)
         }
@@ -134,12 +157,15 @@ actor SwiftDatabase {
         try ensureRunning()
         for attempt in 0...12 {
             do {
-                return try await withConnection { connection in
+                return try await withConnection(configureSession: false) { connection in
                     let timeout = self.options.statementTimeout
                     let lease = SwiftSQLLease(connection, timeout: timeout)
                     _ = try await SwiftSQLDriver.run(connection, "BEGIN ISOLATION LEVEL SERIALIZABLE", [], read: false, timeout: timeout)
                     var committing = false
                     do {
+                        // Supavisor transaction mode pins its backend only after BEGIN. Local
+                        // settings therefore cover the exact backend used by all transaction SQL.
+                        try await Self.applySettings(connection, options: self.options, local: true)
                         let result = try await work(SwiftSQLConnection(lease: lease))
                         try await lease.finish()
                         try Task.checkCancellation()
@@ -180,7 +206,12 @@ actor SwiftDatabase {
         guard runner != nil else { throw SwiftDatabaseError("not_started") }
         try Task.checkCancellation()
     }
-    private func withConnection<T: Sendable>(_ work: @escaping @Sendable (PostgresConnection) async throws -> T) async throws -> T {
+    private static func applySettings(_ connection: PostgresConnection, options: SwiftDatabaseOptions, local: Bool) async throws {
+        _ = try await SwiftSQLDriver.run(connection,
+            "SELECT set_config('search_path', quote_ident($1::text), $3::boolean), set_config('statement_timeout', $2::text, $3::boolean), set_config('TimeZone', 'UTC', $3::boolean)",
+            [.string(options.schema), .string(String(options.statementTimeout * 1000)), .bool(local)], read: false, timeout: options.statementTimeout)
+    }
+    private func withConnection<T: Sendable>(configureSession: Bool = true, _ work: @escaping @Sendable (PostgresConnection) async throws -> T) async throws -> T {
         let client = client; let options = options
         let acquired = AcquisitionState()
         // The timer covers leasing only, never times out a business closure halfway through COMMIT.
@@ -189,9 +220,7 @@ actor SwiftDatabase {
                 do {
                     return try await client.withConnection { connection in
                         guard await acquired.claim() else { throw SwiftDatabaseError("pool_timeout") }
-                        _ = try await SwiftSQLDriver.run(connection,
-                            "SELECT set_config('search_path', quote_ident($1::text), false), set_config('statement_timeout', $2::text, false), set_config('TimeZone', 'UTC', false)",
-                            [.string(options.schema), .string(String(options.statementTimeout * 1000))], read: false, timeout: options.statementTimeout)
+                        if configureSession { try await Self.applySettings(connection, options: options, local: false) }
                         return try await work(connection)
                     }
                 } catch let error as PSQLError { throw SwiftDatabaseError.safe(error) }

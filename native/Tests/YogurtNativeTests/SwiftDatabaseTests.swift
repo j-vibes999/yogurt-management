@@ -15,7 +15,15 @@ final class SwiftDatabaseTests: XCTestCase {
             XCTAssertTrue(options.verifiesCertificateAndHostname)
             XCTAssertEqual(options.tlsServerName, "db.example.supabase.co")
         }
-        for query in ["schema=bad%2Cpublic", "connection_limit=999", "connect_timeout=0", "pool_timeout=not-a-number", "socket_timeout=-1"] {
+        let sessionURL = "postgresql://tester:secret@aws-0-example.pooler.supabase.com:5432/postgres?sslmode=require"
+        XCTAssertFalse(try SwiftDatabaseOptions(configuration: configuration(sessionURL), verification: false).transactionPooling)
+        let pooled = try SwiftDatabaseOptions(configuration: configuration(sessionURL.replacingOccurrences(of: ":5432/", with: ":6543/")), verification: false)
+        XCTAssertTrue(pooled.transactionPooling)
+        XCTAssertEqual(pooled.clientConfiguration.port, 6543)
+        XCTAssertEqual(pooled.clientConfiguration.host, "aws-0-example.pooler.supabase.com")
+        XCTAssertTrue(try SwiftDatabaseOptions(configuration: configuration(local + "&pgbouncer=true"), verification: true).transactionPooling)
+        XCTAssertFalse(try SwiftDatabaseOptions(configuration: configuration(local + "&pgbouncer=false"), verification: true).transactionPooling)
+        for query in ["schema=bad%2Cpublic", "connection_limit=999", "connect_timeout=0", "pool_timeout=not-a-number", "socket_timeout=-1", "pgbouncer=maybe"] {
             XCTAssertThrowsError(try SwiftDatabase(configuration: configuration(local + "&" + query), verification: true))
         }
     }
@@ -234,8 +242,149 @@ final class SwiftDatabaseTests: XCTestCase {
         } catch { await database.stop(); throw error }
     }
 
+    func testInFlightLeaseFailureIsDrainedBeforeCommitAndPoolRelease() async throws {
+        let fixture = try LocalPostgresFixture(); defer { fixture.stop() }
+        let database = try SwiftDatabase(configuration: configuration(fixture.url + "&connection_limit=1&socket_timeout=5"), verification: true)
+        let observer = try SwiftDatabase(configuration: configuration(fixture.url + "&connection_limit=1"), verification: true)
+        try await database.start(); try await observer.start()
+        do {
+            try await database.execute("CREATE TABLE lease_records (id text PRIMARY KEY)", [])
+            try await observer.execute("SELECT pg_advisory_lock(718231::bigint)", [])
+            let publication = InFlightLeasePublication()
+            let transaction = Task {
+                try await database.transaction { connection in
+                    try await connection.execute("INSERT INTO lease_records VALUES ('must-rollback')", [])
+                    let backend = try await connection.rows("SELECT pg_backend_pid() AS pid", [])
+                    let pid = backend[0]["pid"]
+                    let orphan = Task {
+                        try await connection.execute("DO $$ BEGIN PERFORM pg_advisory_xact_lock(718231::bigint); RAISE EXCEPTION 'synthetic late failure' USING ERRCODE='22012'; END $$", [])
+                    }
+                    await publication.publish(connection, orphan)
+                    // The server confirms the statement is running and blocked before work returns.
+                    let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+                    while ContinuousClock.now < deadline {
+                        let rows = try await observer.rows("SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1::integer", [pid])
+                        if rows.first?.text("wait_event_type") == "Lock" { return "incorrect success" }
+                        try await Task.sleep(for: .milliseconds(10))
+                    }
+                    throw NativeFailure("Fixture statement did not reach its advisory-lock barrier")
+                }
+            }
+            let (connection, orphan) = try await publication.value()
+            // This observes finish sealing the lease, not an arbitrary delay or scheduler guess.
+            let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+            var sealed = false
+            while ContinuousClock.now < deadline {
+                do { _ = try await connection.rows("SELECT 1", []) }
+                catch let error as SwiftDatabaseError {
+                    if error.code == "connection_released" { sealed = true; break }
+                    XCTAssertEqual(error.code, "connection_busy")
+                }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertTrue(sealed, "Transaction finish must seal the lease before draining")
+            try await observer.execute("SELECT pg_advisory_unlock(718231::bigint)", [])
+            do { _ = try await transaction.value; XCTFail("Late statement failure escaped COMMIT as success") }
+            catch { XCTAssertEqual((error as? SwiftDatabaseError)?.sqlState, "22012") }
+            do { try await orphan.value; XCTFail("Synthetic late statement unexpectedly succeeded") }
+            catch { XCTAssertEqual((error as? SwiftDatabaseError)?.sqlState, "22012") }
+            let records = try await database.rows("SELECT count(*) AS count FROM lease_records", [])
+            XCTAssertEqual(records.first?["count"], .integer(0))
+            // A new transaction on the sole pooled connection remains usable after rollback/drain.
+            try await database.transaction { connection in
+                try await connection.execute("INSERT INTO lease_records VALUES ('next-transaction')", [])
+            }
+            let remaining = try await database.rows("SELECT id FROM lease_records", [])
+            XCTAssertEqual(remaining.map { $0.text("id") }, ["next-transaction"])
+            await database.stop(); await observer.stop()
+        } catch { await database.stop(); await observer.stop(); throw error }
+    }
+
+    func testDrainingStalledLeaseOperationIsBoundedBeforeCommit() async throws {
+        let fixture = try LocalPostgresFixture(); defer { fixture.stop() }
+        let database = try SwiftDatabase(configuration: configuration(fixture.url + "&connection_limit=1&socket_timeout=1"), verification: true)
+        let observer = try SwiftDatabase(configuration: configuration(fixture.url + "&connection_limit=1"), verification: true)
+        try await database.start(); try await observer.start()
+        do {
+            try await observer.execute("SELECT pg_advisory_lock(718232::bigint)", [])
+            let publication = InFlightLeasePublication()
+            let started = ContinuousClock.now
+            let transaction = Task {
+                try await database.transaction { connection in
+                    let backend = try await connection.rows("SELECT pg_backend_pid() AS pid", [])
+                    let pid = backend[0]["pid"]
+                    let orphan = Task { try await connection.execute("SELECT pg_advisory_xact_lock(718232::bigint)", []) }
+                    await publication.publish(connection, orphan)
+                    let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+                    while ContinuousClock.now < deadline {
+                        let rows = try await observer.rows("SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1::integer", [pid])
+                        if rows.first?.text("wait_event_type") == "Lock" { return }
+                        try await Task.sleep(for: .milliseconds(10))
+                    }
+                    throw NativeFailure("Fixture statement did not reach its advisory-lock barrier")
+                }
+            }
+            let (_, orphan) = try await publication.value()
+            do { try await transaction.value; XCTFail("Timed-out orphan statement escaped as success") }
+            catch {
+                let failure = error as? SwiftDatabaseError
+                XCTAssertNotNil(failure)
+                XCTAssertNotEqual(failure?.code, "commit_uncertain", "No COMMIT may begin before the orphan finishes")
+                XCTAssertTrue(failure?.sqlState == "57014" || failure?.code == "query_timeout" || failure?.code == "connection_error")
+            }
+            XCTAssertLessThan(started.duration(to: .now), .seconds(4), "SQL deadline must bound lease drain")
+            _ = await orphan.result
+            try await observer.execute("SELECT pg_advisory_unlock(718232::bigint)", [])
+            let recovered = try await database.rows("SELECT 11 AS answer", [])
+            XCTAssertEqual(recovered.first?["answer"], .integer(11))
+            await database.stop(); await observer.stop()
+        } catch { await database.stop(); await observer.stop(); throw error }
+    }
+
+    func testTransactionPoolingKeepsStandaloneReadsAndWritesInConfiguredSchema() async throws {
+        let fixture = try LocalPostgresFixture(); defer { fixture.stop() }
+        let observer = try SwiftDatabase(configuration: configuration(fixture.url), verification: true)
+        let database = try SwiftDatabase(configuration: configuration(fixture.url + "&pgbouncer=true&schema=pooled_scope&socket_timeout=2&connection_limit=1"), verification: true)
+        try await observer.start(); try await database.start()
+        do {
+            try await observer.execute("CREATE SCHEMA pooled_scope", [])
+            try await observer.execute("CREATE TABLE pooled_scope.setting_log (schema_name text, zone_name text, timeout_value text, isolation_value text)", [])
+            try await database.execute("INSERT INTO setting_log SELECT current_setting('search_path'), current_setting('TimeZone'), current_setting('statement_timeout'), current_setting('transaction_isolation')", [])
+            let written = try await observer.rows("SELECT * FROM pooled_scope.setting_log", [])
+            XCTAssertEqual(written.first?.text("schema_name"), "pooled_scope")
+            XCTAssertEqual(written.first?.text("zone_name"), "UTC")
+            XCTAssertEqual(written.first?.text("timeout_value"), "2s")
+            XCTAssertEqual(written.first?.text("isolation_value"), "serializable")
+            let read = try await database.rows("SELECT current_setting('search_path') AS schema_name, current_setting('TimeZone') AS zone_name, current_setting('statement_timeout') AS timeout_value, current_setting('transaction_isolation') AS isolation_value", [])
+            XCTAssertEqual(read.first?.text("schema_name"), "pooled_scope")
+            XCTAssertEqual(read.first?.text("zone_name"), "UTC")
+            XCTAssertEqual(read.first?.text("timeout_value"), "2s")
+            XCTAssertEqual(read.first?.text("isolation_value"), "serializable")
+            let explicit = try await database.transaction { connection in
+                try await connection.rows("SELECT current_setting('search_path') AS schema_name, current_setting('TimeZone') AS zone_name, current_setting('statement_timeout') AS timeout_value", [])
+            }
+            XCTAssertEqual(explicit.first?.text("schema_name"), "pooled_scope")
+            XCTAssertEqual(explicit.first?.text("zone_name"), "UTC")
+            XCTAssertEqual(explicit.first?.text("timeout_value"), "2s")
+            await database.stop(); await observer.stop()
+        } catch { await database.stop(); await observer.stop(); throw error }
+    }
+
     private func configuration(_ url: String) -> BackendConfiguration {
         BackendConfiguration(databaseURL: url, sessionSecret: String(repeating: "s", count: 32), legacyReviewed: true)
+    }
+}
+
+private actor InFlightLeasePublication {
+    private var published: (SwiftSQLConnection, Task<Void, Error>)?
+    func publish(_ connection: SwiftSQLConnection, _ task: Task<Void, Error>) { published = (connection, task) }
+    func value() async throws -> (SwiftSQLConnection, Task<Void, Error>) {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while ContinuousClock.now < deadline {
+            if let published { return published }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw NativeFailure("Fixture transaction did not publish its active lease")
     }
 }
 
