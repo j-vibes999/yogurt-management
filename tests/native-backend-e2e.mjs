@@ -541,6 +541,67 @@ async function receiptsAndExpenses(fixture) {
   equal("expense-single-void-audit", await client.auditLog.count({ where: { entityType: "expense", entityId: expense.id, action: "void" } }), 1);
 }
 
+/** Catalog, store and fridge management used by the native app (not part of the original 626 checks). */
+async function catalogWorkflows(fixture, batch) {
+  stage = "catalog-store-and-fridge-management";
+  const product = await replay("/api/products", { code: "NATIVE-NEW", name: "ສິນຄ້າໃໝ່ທົດສອບ", sizeDescription: "  ", retailPrice: "12.50", shelfLifeDays: 14 });
+  same("product-create-view", [product.data.product.code, product.data.product.sizeDescription, product.data.product.retailPrice, product.data.product.shelfLifeDays, product.data.product.isActive], ["NATIVE-NEW", null, 12.5, 14, true]);
+  equal("product-duplicate-code", (await mutation("/api/products", { code: "NATIVE-NEW", name: "x", retailPrice: "1", shelfLifeDays: 1 })).status, 409);
+  equal("product-invalid-price", (await mutation("/api/products", { code: "NATIVE-BAD", name: "x", retailPrice: "1.005", shelfLifeDays: 1 })).status, 400);
+  const productEdit = await replay(`/api/products/${product.data.product.id}`, { retailPrice: "13.75", isActive: false }, { method: "PATCH", status: 200 });
+  same("product-update-view", [productEdit.data.product.retailPrice, productEdit.data.product.isActive], [13.75, false]);
+  equal("product-update-missing", (await mutation("/api/products/no-such-product", { name: "x" }, { method: "PATCH" })).status, 404);
+  equal("product-update-empty", (await mutation(`/api/products/${product.data.product.id}`, {}, { method: "PATCH" })).status, 400);
+  equal("product-update-forbidden", (await mutation(`/api/products/${product.data.product.id}`, { name: "x" }, { method: "PATCH", role: "production" })).status, 403);
+
+  const material = await replay("/api/materials", { code: "NATIVE-SUGAR", name: "ນ້ຳຕານທົດສອບ", category: "ingredient", unit: "kg", minStock: "2.125", avgCostPerUnit: "8.5" });
+  same("material-create-view", [material.data.material.minStock, material.data.material.cost, material.data.material.isActive], [2.125, 8.5, true]);
+  equal("material-duplicate-code", (await mutation("/api/materials", { code: "NATIVE-SUGAR", name: "x", category: "ingredient", unit: "kg" })).status, 409);
+  equal("material-too-precise", (await mutation("/api/materials", { code: "NATIVE-FINE", name: "x", category: "ingredient", unit: "kg", avgCostPerUnit: "1.23456" })).status, 400);
+  const materialEdit = await replay(`/api/materials/${material.data.material.id}`, { avgCostPerUnit: "9.25", minStock: 3, unit: "g" }, { method: "PATCH", status: 200 });
+  same("material-update-view", [materialEdit.data.material.cost, materialEdit.data.material.minStock, materialEdit.data.material.unit], [9.25, 3, "g"]);
+  equal("material-unit-in-use", (await mutation(`/api/materials/${fixture.milk.id}`, { unit: "ml" }, { method: "PATCH" })).status, 409);
+
+  const recipe = await replay("/api/recipes", { finishedProductId: fixture.product.id, baseCups: "50", name: "ສູດໃໝ່", items: [{ rawMaterialId: fixture.milk.id, quantityRequired: "1.2500" }, { rawMaterialId: fixture.cups.id, quantityRequired: 50 }] }, { role: "production" });
+  equal("recipe-new-version", recipe.data.version, 2);
+  equal("recipe-single-default", await client.recipe.count({ where: { finishedProductId: fixture.product.id, isDefault: true } }), 1);
+  equal("recipe-duplicate-material", (await mutation("/api/recipes", { finishedProductId: fixture.product.id, baseCups: 10, items: [{ rawMaterialId: fixture.milk.id, quantityRequired: 1 }, { rawMaterialId: fixture.milk.id, quantityRequired: 2 }] }, { role: "production" })).status, 400);
+  equal("recipe-inactive-material", (await mutation("/api/recipes", { finishedProductId: fixture.product.id, baseCups: 10, items: [{ rawMaterialId: "no-such-material", quantityRequired: 1 }] }, { role: "production" })).status, 409);
+
+  const remaining = (await client.productionBatch.findUniqueOrThrow({ where: { id: batch.id } })).quantityRemaining;
+  await replay("/api/finished-goods/adjust", { batchId: batch.id, quantity: "1", reason: "damaged in storage", note: "synthetic" }, { role: "production" });
+  equal("write-off-deducts-batch", (await client.productionBatch.findUniqueOrThrow({ where: { id: batch.id } })).quantityRemaining, remaining - 1);
+  same("write-off-keeps-cost", (await client.finishedGoodsAdjustment.findFirstOrThrow({ where: { productionBatchId: batch.id } })).unitCost.toString(), "0.4336");
+  equal("write-off-over-stock", (await mutation("/api/finished-goods/adjust", { batchId: batch.id, quantity: 100000, reason: "x" }, { role: "production" })).status, 409);
+  equal("write-off-invalid", (await mutation("/api/finished-goods/adjust", { batchId: batch.id, quantity: "1.5", reason: "x" }, { role: "production" })).status, 400);
+
+  const store = await replay("/api/stores", { name: "ຮ້ານໃໝ່ທົດສອບ", assetCode: "NATIVE-FRIDGE-2", phone: " 020 1234 ", latitude: "17.96", longitude: 102.61, commissionRate: "0.25", monthlyElectricity: "1500.5", capacityCups: "80", fridgeStartDate: "2199-01-15" });
+  equal("store-create-fridge", store.data.fridge, "NATIVE-FRIDGE-2");
+  const created = await client.store.findUniqueOrThrow({ where: { id: store.data.id }, include: { fridge: { include: { inventory: true } } } });
+  same("store-create-exact", [created.commissionRate.toString(), created.monthlyElectricity.toString(), created.latitude.toString(), created.longitude.toString(), created.whatsapp, created.fridge.capacityCups, created.fridge.model], ["0.25", "1500.5", "17.96", "102.61", "020 1234", 80, "Yogurt Display 100"]);
+  equal("store-create-inventory-rows", created.fridge.inventory.length, await client.finishedProduct.count({ where: { isActive: true } }));
+  equal("store-duplicate-asset", (await mutation("/api/stores", { name: "x", assetCode: "NATIVE-FRIDGE-2" })).status, 409);
+  equal("store-invalid-latitude", (await mutation("/api/stores", { name: "x", assetCode: "NATIVE-FRIDGE-3", latitude: "91" })).status, 400);
+  const edited = await mutation(`/api/stores/${store.data.id}`, { name: "ຮ້ານແກ້ໄຂ", latitude: "", longitude: null, commissionRate: "0.3", whatsapp: "" }, { method: "PATCH", key: undefined });
+  same("store-edit-result", [edited.status, edited.data?.name, edited.data?.isActive], [200, "ຮ້ານແກ້ໄຂ", true]);
+  const afterEdit = await client.store.findUniqueOrThrow({ where: { id: store.data.id } });
+  same("store-edit-exact", [afterEdit.latitude, afterEdit.longitude, afterEdit.commissionRate.toString(), afterEdit.whatsapp], [null, null, "0.3", null]);
+  equal("store-deactivate-with-balance", (await mutation(`/api/stores/${fixture.store.id}`, {}, { method: "DELETE", key: undefined })).status, 409);
+
+  const fridge = created.fridge;
+  equal("fridge-capacity-below-stock", (await mutation(`/api/fridges/${fixture.store.fridge.id}`, { capacityCups: 1 }, { method: "PATCH", key: undefined })).status, 409);
+  equal("fridge-maintenance-with-stock", (await mutation(`/api/fridges/${fixture.store.fridge.id}`, { status: "maintenance" }, { method: "PATCH", key: undefined })).status, 409);
+  equal("fridge-duplicate-asset", (await mutation(`/api/fridges/${fridge.id}`, { assetCode: "NATIVE-FRIDGE" }, { method: "PATCH", key: undefined })).status, 409);
+  const unplugged = await mutation(`/api/fridges/${fridge.id}`, { currentStoreId: "", model: "Display 80", serialNo: "SN-NATIVE-2", status: "maintenance", capacityCups: 90 }, { method: "PATCH", key: undefined });
+  same("fridge-unplug", [unplugged.status, unplugged.data?.storeId, unplugged.data?.status], [200, null, "maintenance"]);
+  const deactivated = await mutation(`/api/stores/${store.data.id}`, {}, { method: "DELETE", key: undefined });
+  same("store-deactivate", [deactivated.status, deactivated.data?.isActive], [200, false]);
+  const moved = await mutation(`/api/fridges/${fridge.id}`, { currentStoreId: store.data.id, status: "active" }, { method: "PATCH", key: undefined });
+  equal("fridge-move-to-inactive-store", moved.status, 404);
+  same("expense-category-create", [(await mutation("/api/expense-categories", { name: " ຄ່ານ້ຳ " }, { key: undefined })).data?.category, (await mutation("/api/expense-categories", { name: "ຄ່ານ້ຳ" }, { key: undefined })).status], ["ຄ່ານ້ຳ", 201]);
+  equal("expense-category-single-row", await client.expenseCategory.count({ where: { name: "ຄ່ານ້ຳ" } }), 1);
+}
+
 async function closingWorkflow() {
   stage = "daily-closing-original-snapshot-replay";
   const closingDate = "2199-12-31";
@@ -645,8 +706,8 @@ try {
     if (uiFixture) await keepUIFixture(fixture);
     else {
       await startBackend(); await loginRoles(); await compareReads("initial", fixture); await nativeReads(fixture);
-      await stockWorkflows(fixture); await financeWorkflows(fixture);
-      await receiptsAndExpenses(fixture); await closingWorkflow(); await compareReads("after-workflows", fixture); await freshReadAuthorization();
+      const batch = await stockWorkflows(fixture); await financeWorkflows(fixture);
+      await receiptsAndExpenses(fixture); await catalogWorkflows(fixture, batch); await closingWorkflow(); await compareReads("after-workflows", fixture); await freshReadAuthorization();
       stage = "final-database-invariants";
       equal("no-negative-raw-stock", await client.rawMaterial.count({ where: { currentStock: { lt: 0 } } }), 0);
       equal("no-negative-fridge-stock", await client.fridgeInventory.count({ where: { currentStock: { lt: 0 } } }), 0);
