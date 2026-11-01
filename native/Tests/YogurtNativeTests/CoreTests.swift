@@ -22,6 +22,12 @@ final class CoreTests: XCTestCase {
         XCTAssertThrowsError(try ScopedTransport.sessionCookie("other=value; Path=/; HttpOnly; Secure; SameSite=Strict"))
         XCTAssertThrowsError(try ScopedTransport.sessionCookie("yogurt_session=x; Path=/; Domain=evil.test; HttpOnly; Secure; SameSite=Strict"))
     }
+    func testOnlyTheLogoutReplyToLoginCountsAsCompletedRedirect() {
+        XCTAssertTrue(ScopedTransport.isLogoutCompletion(path: "/api/auth/logout", status: 303, location: "/login"))
+        XCTAssertFalse(ScopedTransport.isLogoutCompletion(path: "/api/auth/logout", status: 303, location: "https://evil.test/login"))
+        XCTAssertFalse(ScopedTransport.isLogoutCompletion(path: "/api/auth/logout", status: 302, location: "/login"))
+        XCTAssertFalse(ScopedTransport.isLogoutCompletion(path: "/api/session", status: 303, location: "/login"))
+    }
 
     func testDurableCommandsKeepIdentityAcrossRestartAndAccountSwitch() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

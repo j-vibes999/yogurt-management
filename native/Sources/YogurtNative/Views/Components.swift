@@ -6,6 +6,9 @@ enum Theme {
     static let cream = color(0xF8F6EF), surface = Color.white, evergreen = color(0x173B31), green = color(0x20754F)
     static let ink = color(0x21372D), muted = color(0x617166), border = color(0xDCE4D9), blue = color(0x326D96)
     static let mango = color(0x8A5B17), purple = color(0x75509E), danger = color(0xB6444E)
+    // Navigation tokens from src/app/professional.css (--sidebar-text, --line-strong, --surface-soft, --sidebar-active-bg, --accent).
+    static let sidebarText = color(0xD4E4D9), sidebarIcon = color(0xB7C6B8), surfaceSoft = color(0xF4F7F2), mint = color(0xEAF5ED)
+    static let accent = color(0xE6AA50), success = color(0x2A754B), onlineDot = color(0x7BCB9A)
     static func font(_ size: CGFloat = 14, weight: Font.Weight = .regular) -> Font { .custom("NotoSansLao-Regular", size: size).weight(weight) }
     static func registerFonts() {
         for name in ["NotoSansLao-Variable", "NotoSansLao"] {
@@ -61,10 +64,18 @@ struct ReadStateView<Content: View>: View {
             if state.loading { ProgressView(state.data == .null ? "ກຳລັງໂຫຼດ…" : "ກຳລັງອັບເດດ…").controlSize(.small) }
             if state.data != .null {
                 if state.source == "demo" { StatusLabel("ຂໍ້ມູນສາທິດ · ບັນທຶກລາຍການບໍ່ໄດ້", tone: .warning) }
-                content
+                // One control height for every workspace's search and filter row.
+                content.controlSize(.large)
                 if !state.generatedAt.isEmpty { Text("ອັບເດດ \(operationsDate(state.generatedAt))").font(Theme.font(11)).foregroundStyle(Theme.muted).textSelection(.enabled) }
             } else if !state.loading && state.error == nil { EmptyNotice(title: "ຍັງບໍ່ມີຂໍ້ມູນ") }
         }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension View {
+    /// Tables share the panel shape: white, 10-point corners and a restrained border (DESIGN.md › Tables, Radius).
+    func tableSurface() -> some View {
+        clipShape(RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
     }
 }
 

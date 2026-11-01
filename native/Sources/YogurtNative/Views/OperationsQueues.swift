@@ -136,7 +136,7 @@ struct RefillsView: View {
                             TableColumn("ສະຖານະ") { row in StatusLabel(operationsStatus(row.text("status")), tone: operationsTone(row.text("status"))) }.width(min: 120, ideal: 145)
                             TableColumn("ສິນຄ້າ") { row in Text(row["items"].array.map { $0.text("name") + " × " + $0["quantity"].text }.joined(separator: ", ")) }.width(min: 220, ideal: 300)
                             TableColumn("ວັນທີຮ້ອງຂໍ") { row in Text(operationsDate(row.text("requestedAt"))) }.width(min: 130, ideal: 150)
-                        }.frame(minHeight: 370)
+                        }.frame(minHeight: 370).tableSurface()
                         .contextMenu(forSelectionType: String.self) { ids in
                             if let id = ids.first { Button("ເປີດຄຳຂໍ") { detail = rows.first { $0.id == id } } }
                         } primaryAction: { ids in if let id = ids.first { detail = rows.first { $0.id == id } } }
@@ -309,7 +309,7 @@ struct DriverView: View {
                         Picker("ຮອບກວດ", selection: $filter) { Text("ເຖິງຮອບ").tag("due"); Text("ກວດແລ້ວ").tag("done"); Text("ທັງໝົດ").tag("all") }.pickerStyle(.segmented).frame(width: 350)
                     }
                     if rows.isEmpty { EmptyNotice(title: filter == "due" ? "ກວດຮ້ານຄົບແລ້ວ" : "ບໍ່ພົບຮ້ານ", detail: query.isEmpty ? "ເລືອກທັງໝົດເພື່ອເບິ່ງຮ້ານ" : "ລອງປ່ຽນຄຳຄົ້ນຫາ", symbol: "checkmark.circle") }
-                    LazyVStack(spacing: 0) {
+                    if !rows.isEmpty { LazyVStack(spacing: 0) {
                             ForEach(rows) { row in
                                 HStack(spacing: 20) {
                                     VStack(alignment: .leading, spacing: 6) {
@@ -320,10 +320,10 @@ struct DriverView: View {
                                     Spacer()
                                     StatusLabel(row["due"].bool ? "ເຖິງຮອບກວດ" : "ກວດແລ້ວ", tone: row["due"].bool ? .warning : .success)
                                     Button("ເລີ່ມກວດ") { auditStore = row }.buttonStyle(.borderedProminent).disabled(!model.canWrite || state.source != "database" || row["fridge"] == .null)
-                                }.padding(.vertical, 16)
-                                Divider()
+                                }.padding(.vertical, 14).padding(.horizontal, 16)
+                                if row.id != rows.last?.id { Divider().padding(.leading, 16) }
                             }
-                    }
+                    }.background(Theme.surface).tableSurface() }
                 }
             }
         }

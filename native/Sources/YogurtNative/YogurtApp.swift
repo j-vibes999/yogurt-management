@@ -16,8 +16,10 @@ import AppKit
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandMenu("ໜ້າວຽກ") {
-                ForEach(Destination.allCases) { destination in
-                    Button(destination.title) { model.navigate(destination) }.disabled(!destination.isAllowed(role: model.session?.role ?? ""))
+                // ⌘1–⌘9 follow the sidebar order, replacing the arrow keys of a system list.
+                ForEach(Array(Destination.allCases.enumerated()), id: \.element) { index, destination in
+                    let button = Button(destination.title, systemImage: destination.symbol) { model.navigate(destination) }.disabled(!destination.isAllowed(role: model.session?.role ?? ""))
+                    if index < 9 { button.keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command) } else { button }
                 }
             }
         }
@@ -43,21 +45,7 @@ struct NativeRootView: View {
             if !model.ready { NativeStartupView(model: model) }
             else if let session = model.session {
                 NavigationSplitView {
-                    List(selection: Binding<Destination?>(get: { model.selected }, set: { if let value = $0 { model.navigate(value) } })) {
-                        Section("ວຽກປະຈຳວັນ") { links([.overview, .stores, .map, .refills, .driver, .settlements], role: session.role) }
-                        Section("ສະຕັອກ ແລະການຜະລິດ") { links([.inventory, .production], role: session.role) }
-                        if session.role == "admin" {
-                            Section("ການເງິນ") { links([.expenses, .reports], role: session.role) }
-                            Section("ຈັດການ") { links([.operations], role: session.role) }
-                        }
-                    }.listStyle(.sidebar).navigationTitle("Yogurt Manager").navigationSplitViewColumnWidth(min: 220, ideal: 245, max: 300)
-                    .safeAreaInset(edge: .bottom) {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(session.fullName).font(Theme.font(13, weight: .semibold))
-                            Text(session.role == "admin" ? "ຜູ້ຈັດການ" : session.role == "driver" ? "ຈັດສົ່ງ / ຮັບເງິນ" : "ຝ່າຍຜະລິດ").font(Theme.font(11)).foregroundStyle(Theme.muted)
-                            Text("SwiftUI · Supabase").font(.system(size: 10)).foregroundStyle(.secondary)
-                        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    SidebarView(model: model, session: session).navigationSplitViewColumnWidth(min: 236, ideal: 256, max: 300)
                 } detail: {
                     VStack(spacing: 0) {
                         if session.source != "database" { banner("ຖານຂໍ້ມູນຂາດການເຊື່ອມຕໍ່ · ອ່ານຂໍ້ມູນເກົ່າໄດ້ ແຕ່ບັນທຶກບໍ່ໄດ້") }
@@ -66,23 +54,26 @@ struct NativeRootView: View {
                         }
                         destination.id(session.userId + ":" + model.selected.rawValue)
                     }.background(Theme.cream)
+                    // Stripes filling the empty space below a few rows read as loading placeholders.
+                    .tableStyle(.inset(alternatesRowBackgrounds: false))
                 }
                 .toolbar {
-                    ToolbarItemGroup(placement: .primaryAction) {
+                    // Without a window title the toolbar has no flexible space, so push the tools to the trailing edge.
+                    ToolbarItem(placement: .automatic) { Spacer() }
+                    ToolbarItemGroup(placement: .automatic) {
                         Button { model.navigate(.notifications) } label: { Label("ແຈ້ງເຕືອນ", systemImage: "bell") }.help("ແຈ້ງເຕືອນ")
-                        Button { recovery = true; Task { await model.refreshPending() } } label: { Label(model.pendingCommands.isEmpty ? "ລາຍການຄ້າງ" : "ລາຍການຄ້າງ (\(model.pendingCommands.count))", systemImage: "clock.arrow.circlepath") }
-                        Menu { Button("ກວດກາການເຊື່ອມຕໍ່") { Task { do { try await model.refreshSession() } catch { model.showNotice(error.localizedDescription) } } }; Button("ອອກຈາກລະບົບ") { Task { do { try await model.logout() } catch { model.showNotice(error.localizedDescription) } } } } label: { Label("ບັນຊີ", systemImage: "person.crop.circle") }
+                        Button { recovery = true; Task { await model.refreshPending() } } label: { Label(model.pendingCommands.isEmpty ? "ລາຍການຄ້າງ" : "ລາຍການຄ້າງ (\(model.pendingCommands.count))", systemImage: "clock.arrow.circlepath") }.help("ລາຍການທີ່ລໍຜົນ")
                     }
                 }
+                // The sidebar already names the app; each workspace shows its own title.
+                .toolbar(removing: .title)
+                .toolbarBackground(Theme.cream, for: .windowToolbar)
             } else { NativeLoginView(model: model) }
         }
         .sheet(isPresented: $recovery) { PendingRecoveryView(model: model) }
         .alert("Yogurt Manager", isPresented: Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })) { Button("ຕົກລົງ") { model.notice = nil } } message: { Text(model.notice ?? "") }
     }
     private func banner(_ text: String) -> some View { Label(text, systemImage: "wifi.exclamationmark").padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Theme.mango.opacity(0.12)) }
-    @ViewBuilder private func links(_ destinations: [Destination], role: String) -> some View {
-        ForEach(destinations.filter { $0.isAllowed(role: role) }) { destination in Label(destination.title, systemImage: destination.symbol).foregroundStyle(destination == model.selected ? Theme.ink : destination.domain.color).tag(destination) }
-    }
     @ViewBuilder private var destination: some View {
         switch model.selected {
         case .overview: OverviewView(model: model)
@@ -110,18 +101,22 @@ struct NativeStartupView: View {
     @State private var choosing = false
     @State private var error: String?
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            Label("Yogurt Manager", systemImage: "cup.and.saucer.fill").font(Theme.font(32, weight: .bold)).foregroundStyle(Theme.evergreen)
-            Text(model.needsConfiguration ? "ເຊື່ອມຕໍ່ Supabase ຂອງທ່ານ" : "ກຳລັງເປີດແອັບ").font(Theme.font(23, weight: .semibold))
+        VStack(alignment: .leading, spacing: 20) {
+            BrandLockup(dark: false)
+            Divider()
+            Text(model.needsConfiguration ? "ເຊື່ອມຕໍ່ Supabase ຂອງທ່ານ" : "ກຳລັງເປີດແອັບ").font(Theme.font(21, weight: .bold)).foregroundStyle(Theme.ink)
             if model.needsConfiguration {
-                Text("ເລືອກໄຟລ໌ .env ຂອງໂປຣເຈັກ. ແອັບຈະເກັບ DATABASE_URL ໃນ macOS Keychain.").fixedSize(horizontal: false, vertical: true)
+                Text("ເລືອກໄຟລ໌ .env ຂອງໂປຣເຈັກ. ແອັບຈະເກັບ DATABASE_URL ໃນ macOS Keychain.").foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 Button("ເລືອກໄຟລ໌ຕັ້ງຄ່າ…") { choosing = true }.buttonStyle(.borderedProminent).controlSize(.large)
             } else if let failure = model.startupError {
-                Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(Theme.danger).textSelection(.enabled)
+                Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(Theme.danger).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 Button("ລອງເປີດໃໝ່") { Task { await model.start() } }.controlSize(.large)
-            } else { ProgressView(model.startupState) }
+            } else { HStack(spacing: 10) { ProgressView().controlSize(.small); Text(model.startupState).foregroundStyle(Theme.muted) } }
             if let error { Text(error).foregroundStyle(Theme.danger) }
-        }.frame(width: 560, alignment: .leading).padding(44).frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.cream)
+        }
+        .padding(32).frame(width: 480, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
+        .frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.cream)
         .fileImporter(isPresented: $choosing, allowedContentTypes: [.item]) { result in
             Task { do { try await model.importConfiguration(result.get()) } catch { self.error = error.localizedDescription } }
         }
@@ -138,21 +133,65 @@ struct NativeLoginView: View {
     enum Field { case email, password }
     var body: some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 24) {
-                Label("Yogurt Manager", systemImage: "cup.and.saucer.fill").font(Theme.font(33, weight: .bold))
-                Text("ຈັດການວຽກປະຈຳວັນ\nຮ້ານຄ້າ, ສະຕັອກ ແລະການເງິນ").font(Theme.font(24, weight: .medium)).lineSpacing(10)
-                Text("ແອັບ macOS · ຖານຂໍ້ມູນ Supabase").font(Theme.font(13)).opacity(0.8)
-            }.foregroundStyle(.white).padding(48).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).background(Theme.evergreen)
+            VStack(alignment: .leading, spacing: 0) {
+                BrandLockup(dark: true)
+                Spacer(minLength: 32)
+                Text("ຈັດການວຽກປະຈຳວັນ\nໃນບ່ອນດຽວ").font(Theme.font(30, weight: .bold)).foregroundStyle(.white).lineSpacing(6).fixedSize(horizontal: false, vertical: true)
+                Text("ຮ້ານຄ້າ, ສະຕັອກ, ການຜະລິດ ແລະການເງິນ ເຊື່ອມກັບຖານຂໍ້ມູນດຽວກັນ").font(Theme.font(15)).foregroundStyle(Theme.sidebarText)
+                    .fixedSize(horizontal: false, vertical: true).padding(.top, 12)
+                VStack(alignment: .leading, spacing: 14) {
+                    LoginFeature(symbol: Destination.driver.symbol, text: "ກວດຮ້ານ, ເຕີມສິນຄ້າ ແລະຮັບເງິນ")
+                    LoginFeature(symbol: Destination.inventory.symbol, text: "ວັດຖຸດິບ ແລະການຜະລິດ")
+                    LoginFeature(symbol: Destination.reports.symbol, text: "ລາຍຈ່າຍ ແລະລາຍງານກຳໄລ")
+                }.padding(.top, 32)
+                Spacer(minLength: 32)
+                Text("ແອັບ macOS · ຂໍ້ມູນຢູ່ໃນ Supabase").font(Theme.font(12)).foregroundStyle(Theme.sidebarText.opacity(0.8))
+            }.padding(48).frame(width: 440).frame(maxHeight: .infinity, alignment: .leading).background(Theme.evergreen)
             VStack(alignment: .leading, spacing: 20) {
-                Text("ເຂົ້າລະບົບ").font(Theme.font(29, weight: .bold)).foregroundStyle(Theme.evergreen)
-                Text("ໃຊ້ບັນຊີຂອງລະບົບເດີມ").foregroundStyle(Theme.muted)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("ເຂົ້າລະບົບ").font(Theme.font(26, weight: .bold)).foregroundStyle(Theme.evergreen)
+                    Text("ໃຊ້ບັນຊີດຽວກັບລະບົບເດີມ").foregroundStyle(Theme.muted)
+                }
                 if let startupError = model.startupError { Label(startupError, systemImage: "wifi.exclamationmark").foregroundStyle(Theme.danger).fixedSize(horizontal: false, vertical: true) }
-                VStack(alignment: .leading, spacing: 8) { Text("ອີເມວ"); TextField("name@example.com", text: $email).textContentType(.username).focused($focus, equals: .email).onSubmit { focus = .password } }
-                VStack(alignment: .leading, spacing: 8) { Text("ລະຫັດຜ່ານ"); SecureField("ລະຫັດຜ່ານ", text: $password).textContentType(.password).focused($focus, equals: .password).onSubmit { Task { await login() } } }
+                VStack(alignment: .leading, spacing: 8) { Text("ອີເມວ").font(Theme.font(13, weight: .semibold)); TextField("name@example.com", text: $email).textContentType(.username).focused($focus, equals: .email).onSubmit { focus = .password } }
+                VStack(alignment: .leading, spacing: 8) { Text("ລະຫັດຜ່ານ").font(Theme.font(13, weight: .semibold)); SecureField("ລະຫັດຜ່ານ", text: $password).textContentType(.password).focused($focus, equals: .password).onSubmit { Task { await login() } } }
                 if let error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Theme.danger).fixedSize(horizontal: false, vertical: true) }
-                HStack { if busy { ProgressView().controlSize(.small) }; Button("ເຂົ້າລະບົບ") { Task { await login() } }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(busy || email.isEmpty || password.isEmpty) }.frame(maxWidth: .infinity, alignment: .trailing)
-            }.textFieldStyle(.roundedBorder).controlSize(.large).disabled(busy).padding(56).frame(width: 500).frame(maxHeight: .infinity).background(Theme.cream)
+                Button { Task { await login() } } label: {
+                    HStack(spacing: 8) { if busy { ProgressView().controlSize(.small) }; Text(busy ? "ກຳລັງເຂົ້າລະບົບ…" : "ເຂົ້າລະບົບ").font(Theme.font(15, weight: .semibold)) }.frame(maxWidth: .infinity)
+                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(busy || email.isEmpty || password.isEmpty).padding(.top, 4)
+            }
+            .textFieldStyle(.roundedBorder).controlSize(.large).disabled(busy)
+            .padding(32).frame(width: 400)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
+            .frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.cream)
         }.onAppear { focus = .email }
     }
     private func login() async { guard !busy else { return }; busy = true; error = nil; defer { busy = false }; do { try await model.login(email: email.trimmingCharacters(in: .whitespaces), password: password); password = "" } catch { self.error = error.localizedDescription } }
+}
+
+/// Brand mark with the product name, as in the sidebar; `dark` places it on evergreen.
+private struct BrandLockup: View {
+    let dark: Bool
+    var body: some View {
+        HStack(spacing: 12) {
+            BrandMark().frame(width: 28, height: 28).foregroundStyle(Theme.evergreen)
+                .frame(width: 44, height: 44).background(Theme.accent, in: RoundedRectangle(cornerRadius: 11))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Yogurt Manager").font(Theme.font(18, weight: .bold)).foregroundStyle(dark ? .white : Theme.evergreen)
+                Text("ລະບົບຈັດການໂຢເກີດ").font(Theme.font(13, weight: .semibold)).foregroundStyle(dark ? Theme.sidebarText : Theme.muted)
+            }
+        }.accessibilityElement(children: .combine)
+    }
+}
+
+private struct LoginFeature: View {
+    let symbol: String
+    let text: String
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.accent)
+                .frame(width: 32, height: 32).background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            Text(text).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.surfaceSoft)
+        }
+    }
 }

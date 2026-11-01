@@ -130,7 +130,7 @@ struct StoresView: View {
                             TableColumn("ຕູ້ແຊ່") { row in Text(row["fridge"].text("assetCode")) }.width(min: 85, ideal: 105)
                             TableColumn("ສິນຄ້າ") { row in Text(row["stock"].text + " / " + row["fridge"]["capacityCups"].text).monospacedDigit() }.width(min: 85, ideal: 100)
                             TableColumn("ຮອບກວດ") { row in StatusLabel(row["due"].bool ? "ເຖິງຮອບ" : "ກວດແລ້ວ", tone: row["due"].bool ? .warning : .success) }.width(min: 100, ideal: 115)
-                        }.frame(minHeight: 350)
+                        }.frame(minHeight: 350).tableSurface()
                         .contextMenu(forSelectionType: String.self) { ids in
                             if let id = ids.first, let row = rows.first(where: { $0.id == id }) { Button("ເປີດຂໍ້ມູນຮ້ານ") { detail = row } }
                         } primaryAction: { ids in

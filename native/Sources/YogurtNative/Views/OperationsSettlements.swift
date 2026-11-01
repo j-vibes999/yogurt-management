@@ -47,7 +47,7 @@ struct SettlementsView: View {
                             TableColumn("ຮັບແລ້ວ") { row in MoneyText(row["paid"]) }.width(min: 105, ideal: 120)
                             TableColumn("ຄົງຄ້າງ") { row in MoneyText(row["closingBalance"]).foregroundStyle(row["closingBalance"].decimal > 0 ? Theme.danger : Theme.green) }.width(min: 105, ideal: 120)
                             TableColumn("ສະຖານະ") { row in StatusLabel(operationsStatus(row.text("status")), tone: operationsTone(row.text("status"))) }.width(min: 115, ideal: 135)
-                        }.frame(minHeight: 350)
+                        }.frame(minHeight: 350).tableSurface()
                         .contextMenu(forSelectionType: String.self) { ids in
                             if let id = ids.first, let row = rows.first(where: { $0.id == id }) {
                                 Button("ເບິ່ງໃບເສັດ") { receipt = row }

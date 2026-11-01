@@ -36,9 +36,9 @@ enum Destination: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .overview: "square.grid.2x2"; case .stores: "storefront"; case .map: "map"; case .refills: "shippingbox"; case .driver: "checklist"
-        case .settlements: "banknote"; case .inventory: "shippingbox.and.arrow.backward"; case .production: "cup.and.saucer"
-        case .expenses: "receipt"; case .reports: "chart.bar.xaxis"; case .operations: "slider.horizontal.3"; case .fridges: "refrigerator"
-        case .notifications: "bell"; case .audit: "clock.arrow.circlepath"
+        case .settlements: "banknote"; case .inventory: "archivebox"; case .production: "cup.and.saucer"
+        case .expenses: "receipt"; case .reports: "chart.bar.xaxis"; case .operations: "gearshape"; case .fridges: "refrigerator"
+        case .notifications: "bell"; case .audit: "checkmark.shield"
         }
     }
     var domain: WorkDomain {

@@ -132,7 +132,7 @@ struct InventoryView: View {
                                 Button("ແກ້ໄຂ / ກວດນັບ") { selected = rawMaterial(row); editor = "edit" }
                             }.disabled(!writable)
                         }.width(120)
-                    }.frame(minHeight: 340)
+                    }.frame(minHeight: 340).tableSurface()
                 }
             }
         }
@@ -271,7 +271,7 @@ struct ProductionView: View {
                         TableColumn("ວັນຜະລິດ") { Text($0.text("mfgDate")) }
                         TableColumn("ໝົດອາຍຸ") { row in VStack(alignment: .leading) { Text(row.text("expDate")); if row["daysToExpiry"].decimal < 0 { StatusLabel("ໝົດອາຍຸ", tone: .danger) } else if row["daysToExpiry"].decimal <= 7 { StatusLabel("ໃກ້ໝົດອາຍຸ", tone: .warning) } } }
                         TableColumn("ຕົ້ນທຶນ / ຖ້ວຍ") { row in VStack(alignment: .leading) { MoneyText(row["unitCost"]); if !row["costKnown"].bool { Text("ບໍ່ຮູ້ຕົ້ນທຶນ").font(Theme.font(12)).foregroundStyle(Theme.muted) } } }
-                    }.frame(minHeight: 320)
+                    }.frame(minHeight: 320).tableSurface()
                 }
                 if history { ManagementPagination(page: page, pages: max(1, Int(state.data["pageCount"].double))) { page = $0; Task { await reload() } } }
             }
@@ -453,7 +453,7 @@ struct ExpensesView: View {
                             else { Text("—").foregroundStyle(Theme.muted) }
                         }
                         TableColumn("ຈັດການ") { row in Menu("ຈັດການ") { Button("ແກ້ໄຂ") { expenseId = row.id; editor = true }; Button("ຍົກເລີກລາຍຈ່າຍ", role: .destructive) { voidExpense = row } }.disabled(!writable) }.width(110)
-                    }.frame(minHeight: 340)
+                    }.frame(minHeight: 340).tableSurface()
                 }
                 ManagementPagination(page: page, pages: max(1, Int(state.data["server"]["pageCount"].double))) { page = $0; Task { await reload() } }
             }
@@ -725,7 +725,7 @@ struct ReportsView: View {
             TableColumn("ຂອງເສຍ") { MoneyText($0["wasteCost"]) }
             TableColumn("ລາຍຈ່າຍ") { MoneyText($0["expenseTotal"]) }
             TableColumn("ກຳໄລ") { row in MoneyText(row["profit"]).foregroundStyle(row["profit"].decimal < 0 ? Theme.danger : Theme.ink) }
-        }.frame(minHeight: 260)
+        }.frame(minHeight: 260).tableSurface()
     }
     private func reload() async {
         let requested = period
@@ -794,7 +794,7 @@ struct OperationsView: View {
                 TableColumn("ອາຍຸ") { Text("\($0.text("shelfLifeDays")) ມື້") }
                 TableColumn("ສະຖານະ") { row in StatusLabel(row["isActive"].bool ? "ເປີດໃຊ້" : "ປິດໃຊ້", tone: row["isActive"].bool ? .success : .neutral) }
                 TableColumn("ຈັດການ") { row in Button("ແກ້ໄຂ") { selected = row; editor = "products" }.disabled(!writable || !admin) }.width(100)
-            }.frame(minHeight: 380)
+            }.frame(minHeight: 380).tableSurface()
         }
     }
     @ViewBuilder private var materialsTable: some View {
@@ -807,7 +807,7 @@ struct OperationsView: View {
                 TableColumn("ຕົ້ນທຶນ / ໜ່ວຍ") { MoneyText($0["avgCostPerUnit"]) }
                 TableColumn("ສະຖານະ") { row in StatusLabel(row["isActive"].bool ? "ເປີດໃຊ້" : "ປິດໃຊ້", tone: row["isActive"].bool ? .success : .neutral) }
                 TableColumn("ຈັດການ") { row in Button("ແກ້ໄຂ") { selected = row; editor = "materials" }.disabled(!writable || !admin) }.width(100)
-            }.frame(minHeight: 380)
+            }.frame(minHeight: 380).tableSurface()
         }
     }
     @ViewBuilder private var recipesTable: some View {
@@ -819,7 +819,7 @@ struct OperationsView: View {
                 TableColumn("ຖ້ວຍພື້ນຖານ") { Text($0.text("baseCups")) }
                 TableColumn("ວັດຖຸດິບ") { Text("\($0["items"].array.count) ລາຍການ") }
                 TableColumn("ຈັດການ") { row in Button("ສ້າງສະບັບໃໝ່") { selected = row; recipeEditor = true }.disabled(!writable) }.width(150)
-            }.frame(minHeight: 380)
+            }.frame(minHeight: 380).tableSurface()
         }
     }
     private var backupContent: some View {
@@ -1083,7 +1083,7 @@ struct FridgesView: View {
                         TableColumn("ຄົງເຫຼືອ / ຄວາມຈຸ") { Text("\($0.text("stockTotal")) / \($0.text("capacityCups")) ຖ້ວຍ").monospacedDigit() }
                         TableColumn("ສະຖານະ") { row in StatusLabel(row.text("status") == "maintenance" ? "ບຳລຸງຮັກສາ" : "ປົກກະຕິ", tone: row.text("status") == "maintenance" ? .warning : .success) }
                         TableColumn("ຈັດການ") { row in Button("ຈັດການ") { selected = row }.disabled(!model.canWrite || state.source != "database" || model.session?.role != "admin") }.width(100)
-                    }.frame(minHeight: 380)
+                    }.frame(minHeight: 380).tableSurface()
                 }
             }
         }.task { await state.load(model, "fridges") }
@@ -1302,7 +1302,7 @@ struct AuditView: View {
                         TableColumn("ຜູ້ດຳເນີນການ") { row in VStack(alignment: .leading) { Text(row["user"].text("fullName")); Text(row["user"].text("role")).font(Theme.font(12)).foregroundStyle(Theme.muted) } }
                         TableColumn("ເວລາ") { Text(mgDateTime($0.text("createdAt"))).monospacedDigit() }
                         TableColumn("ລາຍລະອຽດ") { row in Button("ກວດການປ່ຽນ") { detail = row } }.width(130)
-                    }.frame(minHeight: 350)
+                    }.frame(minHeight: 350).tableSurface()
                 }
                 ManagementPagination(page: page, pages: max(1, Int(state.data["totalPages"].double))) { page = $0; Task { await reload() } }
             }

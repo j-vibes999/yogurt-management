@@ -14,6 +14,8 @@ import UniformTypeIdentifiers
     @Published var needsConfiguration = false
     @Published var legacyReviewed = false
     @Published var pendingCommands: [PendingCommand] = []
+    /// Sidebar badges from `/api/nav-counts`, the same counts the web navigation shows.
+    @Published var navCounts: [Destination: Int] = [:]
     @Published var recoveryError: String?
     let dataDirectory: URL
     private let keychain: KeychainStore
@@ -101,6 +103,16 @@ import UniformTypeIdentifiers
         session = fresh
         if !selected.isAllowed(role: fresh.role) { selected = .overview }
         await refreshPending()
+        await refreshCounts()
+    }
+    func refreshCounts() async {
+        guard ready, session != nil, let reply = try? await client.send(path: "/api/nav-counts"), reply.successful else { navCounts = [:]; return }
+        var counts: [Destination: Int] = [:]
+        for (key, destination) in [("refill", Destination.refills), ("driver", .driver), ("settlements", .settlements), ("inventory", .inventory)] {
+            let value = NSDecimalNumber(decimal: reply.data[key].decimal).intValue
+            if value > 0 { counts[destination] = value }
+        }
+        navCounts = counts
     }
     private func authorize() async throws -> NativeSession {
         guard canWrite, let before = session else { throw NativeFailure(legacyReviewed ? "ຕ້ອງເຊື່ອມຕໍ່ຖານຂໍ້ມູນແລະເຂົ້າລະບົບກ່ອນບັນທຶກ" : "ຕ້ອງກວດກາລາຍການຄ້າງຈາກແອັບເດີມກ່ອນໃຊ້ງານ") }
@@ -184,6 +196,7 @@ import UniformTypeIdentifiers
     func navigate(_ destination: Destination, storeId: String? = nil) {
         guard let role = session?.role, destination.isAllowed(role: role) else { showNotice("ບໍ່ມີສິດເປີດໜ້ານີ້"); return }
         contextStoreId = storeId; selected = destination
+        Task { await refreshCounts() }
     }
     func showNotice(_ text: String) { notice = text }
     func importLegacyReview(_ url: URL) async throws {

@@ -29,6 +29,11 @@ enum ScopedTransport {
         guard maxAge > 0, maxAge <= 43200 else { throw NativeFailure("Session cookie ໝົດອາຍຸ") }
         return SessionCookie(value: value, expiresAt: Date().addingTimeInterval(maxAge))
     }
+    /// The logout route answers the web form with 303 → /login after revoking the session.
+    /// That reply is the success itself; it is never followed.
+    static func isLogoutCompletion(path: String, status: Int, location: String?) -> Bool {
+        path == "/api/auth/logout" && status == 303 && location == "/login"
+    }
 }
 
 private final class NoRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
@@ -81,15 +86,17 @@ actor APIClient {
         do { (data, response) = try await transport.data(for: request) }
         catch is CancellationError { throw CancellationError() }
         catch { throw NativeFailure("ຕິດຕໍ່ backend ບໍ່ໄດ້. ລາຍການທີ່ສົ່ງແລ້ວອາດບັນທຶກສຳເລັດ; ກວດກາລາຍການຄ້າງກ່ອນສົ່ງໃໝ່") }
-        guard let http = response as? HTTPURLResponse, response.url == url, !(300..<400).contains(http.statusCode) else { throw NativeFailure("Backend redirect ຖືກປະຕິເສດ; ບໍ່ໄດ້ສົ່ງ session ໄປທີ່ອື່ນ") }
+        guard let http = response as? HTTPURLResponse, response.url == url else { throw NativeFailure("Backend redirect ຖືກປະຕິເສດ; ບໍ່ໄດ້ສົ່ງ session ໄປທີ່ອື່ນ") }
+        let loggedOut = ScopedTransport.isLogoutCompletion(path: path, status: http.statusCode, location: http.value(forHTTPHeaderField: "Location"))
+        guard !(300..<400).contains(http.statusCode) || loggedOut else { throw NativeFailure("Backend redirect ຖືກປະຕິເສດ; ບໍ່ໄດ້ສົ່ງ session ໄປທີ່ອື່ນ") }
         guard data.count <= 25 * 1024 * 1024 else { throw NativeFailure("ຂໍ້ມູນຕອບກັບໃຫຍ່ເກີນໄປ") }
         if path == "/api/auth/login", (200..<300).contains(http.statusCode) {
             guard let header = http.value(forHTTPHeaderField: "Set-Cookie") else { throw NativeFailure("Backend ບໍ່ໄດ້ສົ່ງ session") }
             let next = try ScopedTransport.sessionCookie(header)
             try await keychain.write(JSONEncoder().encode(next), account: "session-cookie"); cookie = next
         }
-        if path == "/api/auth/logout", (200..<300).contains(http.statusCode) { try await clearSession() }
-        return NativeReply(status: http.statusCode, data: (try? JSONDecoder().decode(JSONValue.self, from: data)) ?? .null, bytes: data,
+        if path == "/api/auth/logout", (200..<300).contains(http.statusCode) || loggedOut { try await clearSession() }
+        return NativeReply(status: loggedOut ? 200 : http.statusCode, data: (try? JSONDecoder().decode(JSONValue.self, from: data)) ?? .null, bytes: data,
                            contentType: http.value(forHTTPHeaderField: "Content-Type") ?? "")
     }
 }
