@@ -177,7 +177,7 @@ test("bootstrap port collision fails without touching the unrelated loopback lis
 });
 
 test("native Node archive verification requires its official filename checksum and rejects changed bytes", async () => {
-  const script = path.join(repository, "scripts/build-native.mjs");
+  const script = path.join(repository, "scripts/build-native-legacy.mjs");
   assert.ok(existsSync(script), "the native package builder must exist");
   const { verifyArchiveAgainstManifest } = await import(script);
   const emptyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";

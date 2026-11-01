@@ -4,22 +4,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { buildDesktop, createBuildEnvironment, run, scanPayload, verifyBackendPayload } from "./build-desktop.mjs";
+import { createBuildEnvironment, run, scanPayload } from "./build-desktop.mjs";
 
+// The shipped Mac app is the Swift binary and its resources only: no Node runtime, Next/Prisma
+// backend, supervisor helper or loopback listener. Node runs here only as the build tool
+// (icon rendering). The archived Node package is build-native-legacy.mjs (parity oracle).
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const NODE_VERSION = "v24.22.2";
-const archiveName = `node-${NODE_VERSION}-darwin-arm64.tar.gz`;
-const officialBase = `https://nodejs.org/dist/${NODE_VERSION}`;
-// Pinned from the official HTTPS release manifest, 27 October 2026.
-const officialArchiveSHA256 = "aa9549349e47dffaa42dcf95d6e06ade8c4bdafc980979883b88767670df385a";
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
-
-export function verifyArchiveAgainstManifest(bytes, manifest, name) {
-  if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new Error("Invalid Node archive filename.");
-  const matches = manifest.split(/\r?\n/).map(line => /^([a-f0-9]{64})\s+\*?(.+)$/.exec(line)).filter(match => match && match[2] === name);
-  if (matches.length !== 1 || sha256(bytes) !== matches[0][1]) throw new Error("Node archive checksum verification failed.");
-  return matches[0][1];
-}
 
 /**
  * Keychain items remember the signature of the app that created them. An ad-hoc signature
@@ -32,6 +23,13 @@ export function chooseSigningIdentity(listing, requested) {
   const preferred = identities.find(match => match[2] === "Developer ID Application") ?? identities[0];
   return preferred ? preferred[1] : "-";
 }
+
+/** Paths that would mean a JavaScript runtime or legacy backend slipped into the package. */
+export function legacyRuntimePath(relative) {
+  return /(^|\/)(?:node|bootstrap\.cjs|yogurt-supervisor|NODE-LICENSE)$/.test(relative)
+    || /(^|\/)(?:backend|runtime|Helpers|node_modules|\.next)(\/|$)/.test(relative);
+}
+
 async function captured(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], ...options });
@@ -42,49 +40,6 @@ async function captured(command, args, options = {}) {
     child.once("exit", code => code === 0 ? resolve(output.trim()) : reject(new Error(`Native build command failed (${code ?? "signal"}).`)));
   });
 }
-async function download(url, limit) {
-  const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(120000) });
-  if (!response.ok || (Number(response.headers.get("content-length")) || 0) > limit) throw new Error("Official Node runtime download failed.");
-  const chunks = []; let size = 0;
-  for await (const chunk of response.body) {
-    size += chunk.length;
-    if (size > limit) throw new Error("Official Node runtime download exceeded its limit.");
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
-}
-
-export async function prepareOfficialNode(build, suppliedArchive) {
-  const cache = path.join(build, "node-cache");
-  await mkdir(cache, { recursive: true });
-  const manifest = (await download(`${officialBase}/SHASUMS256.txt`, 1024 * 1024)).toString("utf8");
-  const archivePath = suppliedArchive ? path.resolve(suppliedArchive) : path.join(cache, archiveName);
-  let bytes;
-  try { bytes = await readFile(archivePath); } catch (error) {
-    if (suppliedArchive || error.code !== "ENOENT") throw error;
-    bytes = await download(`${officialBase}/${archiveName}`, 128 * 1024 * 1024);
-  }
-  const digest = verifyArchiveAgainstManifest(bytes, manifest, archiveName);
-  if (digest !== officialArchiveSHA256) throw new Error("The official Node archive differs from the pinned release.");
-  if (!suppliedArchive) await writeFile(archivePath, bytes);
-  const extracted = path.join(cache, "extracted");
-  await rm(extracted, { recursive: true, force: true }); await mkdir(extracted);
-  // Extract the same immutable byte snapshot that was verified, including when
-  // the caller supplied an archive that could change concurrently.
-  const verified = await mkdtemp(path.join(cache, "verified-"));
-  try {
-    const snapshot = path.join(verified, archiveName);
-    await writeFile(snapshot, bytes, { mode: 0o600, flag: "wx" });
-    await run("/usr/bin/tar", ["-xzf", snapshot, "-C", extracted, `node-${NODE_VERSION}-darwin-arm64/bin/node`, `node-${NODE_VERSION}-darwin-arm64/LICENSE`], { env: createBuildEnvironment() });
-  } finally { await rm(verified, { recursive: true, force: true }); }
-  const node = path.join(extracted, `node-${NODE_VERSION}-darwin-arm64/bin/node`);
-  const identity = await captured(node, ["-p", "JSON.stringify({version:process.version,arch:process.arch,platform:process.platform})"], { env: createBuildEnvironment() });
-  if (identity !== JSON.stringify({ version: NODE_VERSION, arch: "arm64", platform: "darwin" })) throw new Error("Unexpected bundled Node runtime identity.");
-  const libraries = (await captured("/usr/bin/otool", ["-L", node])).split("\n").slice(1).map(line => line.trim().split(" ")[0]).filter(Boolean);
-  if (libraries.some(library => !library.startsWith("/usr/lib/") && !library.startsWith("/System/Library/"))) throw new Error("Bundled Node requires a non-system library.");
-  return { node, license: path.join(extracted, `node-${NODE_VERSION}-darwin-arm64/LICENSE`), digest, manifest };
-}
-
 async function copyTree(source, destination) {
   const stat = await lstat(source);
   if (stat.isSymbolicLink()) throw new Error("Native packaging refused a source symlink.");
@@ -104,58 +59,73 @@ async function makeIcon(build, resources) {
   }
   await run("/usr/bin/iconutil", ["-c", "icns", iconset, "-o", path.join(resources, "Yogurt.icns")]);
 }
+async function files(directory, base = directory) {
+  const found = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) found.push(...await files(file, base)); else found.push(path.relative(base, file));
+  }
+  return found;
+}
 
-export async function buildNative({ nodeArchive, backend, dmg = false, signingIdentity } = {}) {
+export async function buildNative({ dmg = false, signingIdentity } = {}) {
   if (process.platform !== "darwin" || process.arch !== "arm64") throw new Error("The native package targets Apple Silicon macOS.");
   const build = path.join(repository, "build/native");
   await mkdir(build, { recursive: true });
   const environment = createBuildEnvironment();
-  const runtime = await prepareOfficialNode(build, nodeArchive);
-  if (!backend) await buildDesktop();
-  const backendSource = backend ? path.resolve(backend) : path.join(repository, "build/desktop/backend");
-  await verifyBackendPayload(backendSource);
-  await run("/usr/bin/swift", ["build", "--package-path", path.join(repository, "native"), "--configuration", "release", "--arch", "arm64"], { cwd: repository, env: environment });
-  const binaryDirectory = await captured("/usr/bin/swift", ["build", "--package-path", path.join(repository, "native"), "--configuration", "release", "--arch", "arm64", "--show-bin-path"], { cwd: repository, env: environment });
+  const swift = ["build", "--package-path", path.join(repository, "native"), "--configuration", "release", "--arch", "arm64"];
+  await run("/usr/bin/swift", swift, { cwd: repository, env: environment });
+  const binaryDirectory = await captured("/usr/bin/swift", [...swift, "--show-bin-path"], { cwd: repository, env: environment });
   const output = path.join(repository, "dist-native");
   const application = path.join(output, "Yogurt Manager Native.app");
   await rm(application, { recursive: true, force: true });
   const contents = path.join(application, "Contents");
   const resources = path.join(contents, "Resources");
-  const helpers = path.join(contents, "Helpers");
   const executables = path.join(contents, "MacOS");
-  await Promise.all([mkdir(path.join(resources, "runtime"), { recursive: true }), mkdir(helpers, { recursive: true }), mkdir(executables, { recursive: true })]);
+  await Promise.all([mkdir(resources, { recursive: true }), mkdir(executables, { recursive: true })]);
   await copyFile(path.join(binaryDirectory, "YogurtNative"), path.join(executables, "YogurtNative"));
-  const bundles = (await readdir(binaryDirectory)).filter(name => name.startsWith("YogurtNative_") && (name.endsWith(".bundle") || name.endsWith(".resources")));
-  if (!bundles.length) throw new Error("The native Swift resource bundle is missing.");
+  // Every SwiftPM resource/privacy bundle, including transitive packages'. The generated Darwin
+  // accessor checks Bundle.main.resourceURL; the MacOS copy serves executable-relative lookup.
+  const bundles = (await readdir(binaryDirectory)).filter(name => name.endsWith(".bundle") || name.endsWith(".resources"));
+  if (!bundles.includes("YogurtNative_YogurtNative.bundle")) throw new Error("The native Swift resource bundle is missing.");
   for (const name of bundles) {
     await copyTree(path.join(binaryDirectory, name), path.join(resources, name));
     await copyTree(path.join(binaryDirectory, name), path.join(executables, name));
-    // The generated Darwin accessor checks Bundle.main.resourceURL; the MacOS copy
-    // also supports command-line-style executable-relative bundle resolution.
   }
-  await run("/usr/bin/cc", ["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-mmacosx-version-min=15.0", path.join(repository, "native/runtime/supervisor.c"), "-o", path.join(helpers, "yogurt-supervisor")], { env: environment });
-  await Promise.all([
-    copyFile(runtime.node, path.join(resources, "runtime/node")),
-    copyFile(runtime.license, path.join(resources, "runtime/NODE-LICENSE")),
-    copyFile(path.join(repository, "native/runtime/bootstrap.cjs"), path.join(resources, "runtime/bootstrap.cjs")),
-    copyTree(backendSource, path.join(resources, "backend")),
-  ]);
-  await mkdir(path.join(resources, "backend/desktop"), { recursive: true });
-  for (const name of ["backend.cjs", "local-server.cjs"]) await copyFile(path.join(repository, "desktop", name), path.join(resources, "backend/desktop", name));
   const metadata = JSON.parse(await readFile(path.join(repository, "package.json"), "utf8"));
   const plist = (await readFile(path.join(repository, "native/Info.plist"), "utf8")).replaceAll("__VERSION__", metadata.version);
   await writeFile(path.join(contents, "Info.plist"), plist);
   await makeIcon(build, resources);
-  await Promise.all([chmod(path.join(executables, "YogurtNative"), 0o755), chmod(path.join(helpers, "yogurt-supervisor"), 0o755), chmod(path.join(resources, "runtime/node"), 0o755)]);
+  await chmod(path.join(executables, "YogurtNative"), 0o755);
   await run("/usr/bin/plutil", ["-lint", path.join(contents, "Info.plist")]);
-  await verifyBackendPayload(path.join(resources, "backend"));
+
+  // Package policy: Swift binary and resources only, system-only linkage, no secrets.
+  const packaged = await files(application);
+  const legacy = packaged.filter(legacyRuntimePath);
+  if (legacy.length) throw new Error(`Legacy JavaScript runtime file in the Swift package: ${legacy[0]}`);
+  const libraries = (await captured("/usr/bin/otool", ["-L", path.join(executables, "YogurtNative")])).split("\n").slice(1).map(line => line.trim().split(" ")[0]).filter(Boolean);
+  // Swift back-deployment shims resolve from /usr/lib/swift on current macOS (the first rpath);
+  // a bundled copy at @loader_path covers older systems that lack them.
+  const toolchain = (await captured("/usr/bin/otool", ["-l", path.join(executables, "YogurtNative")])).split("\n").map(line => /^\s*path (\S+) \(offset/.exec(line)?.[1]).find(entry => entry?.includes(".xctoolchain/"));
+  for (const library of libraries.filter(name => /^@rpath\/libswiftCompatibility[A-Za-z]*\.dylib$/.test(name))) {
+    if (!toolchain) throw new Error(`No toolchain copy for ${library}`);
+    await copyFile(path.join(toolchain, path.basename(library)), path.join(executables, path.basename(library)));
+  }
+  const foreign = libraries.filter(library => !library.startsWith("/usr/lib/") && !library.startsWith("/System/Library/") && !/^@rpath\/libswiftCompatibility[A-Za-z]*\.dylib$/.test(library));
+  if (foreign.length) throw new Error(`The Swift binary links a non-system library: ${foreign[0]}`);
   await scanPayload(application);
+  const resource = path.join(resources, "YogurtNative_YogurtNative.bundle");
+  const pinnedRoot = (await files(resource)).find(name => name.endsWith("supabase-root-2021.pem"));
+  if (!pinnedRoot) throw new Error("The pinned Supabase root certificate is missing from the package.");
+
   const identity = chooseSigningIdentity(await captured("/usr/bin/security", ["find-identity", "-v", "-p", "codesigning"]), signingIdentity);
   await run("/usr/bin/codesign", ["--force", "--deep", "--timestamp=none", "--sign", identity, application]);
   await run("/usr/bin/codesign", ["--verify", "--deep", "--strict", application]);
-  const manifest = { version: 1, signing: identity === "-" ? "ad-hoc" : "certificate", nodeVersion: NODE_VERSION, officialArchive: archiveName, archiveSHA256: runtime.digest,
-    nodeSHA256: sha256(await readFile(path.join(resources, "runtime/node"))), supervisorSHA256: sha256(await readFile(path.join(helpers, "yogurt-supervisor"))),
-    backendBuildId: (await readFile(path.join(resources, "backend/.next/BUILD_ID"), "utf8")).trim(),
+  const manifest = {
+    version: 2, engine: "swift", signing: identity === "-" ? "ad-hoc" : "certificate",
+    binarySHA256: sha256(await readFile(path.join(executables, "YogurtNative"))),
+    supabaseRootSHA256: sha256(await readFile(path.join(resource, pinnedRoot))),
+    bundles, files: packaged.length, linkedLibraries: libraries,
   };
   // Outside the signed bundle: writing new resources after signing invalidates it.
   await writeFile(path.join(output, "native-build-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -169,7 +139,7 @@ export async function buildNative({ nodeArchive, backend, dmg = false, signingId
       await run("/usr/bin/hdiutil", ["verify", installer]);
     } finally { await rm(staging, { recursive: true, force: true }); }
   }
-  console.log(`Native application staged and verified: ${application}`);
+  console.log(`Native Swift application staged and verified: ${application}`);
   console.log(identity === "-" ? "Signed ad-hoc: each update will ask for Keychain access again." : "Signed with a certificate identity: Keychain access carries over to later builds.");
   if (installer) console.log(`Native installer: ${installer}`);
   return { application, installer, manifest };
@@ -178,9 +148,9 @@ export async function buildNative({ nodeArchive, backend, dmg = false, signingId
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const option = name => { const index = args.indexOf(name); return index < 0 ? undefined : args[index + 1]; };
-  const allowed = new Set(["--node-archive", "--backend", "--dmg", "--sign"]);
-  if (args.some((arg, index) => arg.startsWith("--") && !allowed.has(arg) || ["--node-archive", "--backend", "--sign"].includes(arg) && (!args[index + 1] || args[index + 1].startsWith("--")))) {
-    console.error("Usage: node scripts/build-native.mjs [--node-archive <official tar.gz>] [--backend <verified backend directory>] [--sign <identity hash, or - for ad-hoc>] [--dmg]");
+  const allowed = new Set(["--dmg", "--sign"]);
+  if (args.some((arg, index) => arg.startsWith("--") && !allowed.has(arg) || arg === "--sign" && (!args[index + 1] || args[index + 1].startsWith("--")))) {
+    console.error("Usage: node scripts/build-native.mjs [--sign <identity hash, or - for ad-hoc>] [--dmg]");
     process.exitCode = 1;
-  } else buildNative({ nodeArchive: option("--node-archive"), backend: option("--backend"), dmg: args.includes("--dmg"), signingIdentity: option("--sign") }).catch(() => { console.error("Native packaging failed; no application was launched or installed."); process.exitCode = 1; });
+  } else buildNative({ dmg: args.includes("--dmg"), signingIdentity: option("--sign") }).catch(error => { console.error(`Native packaging failed: ${error.message}`); process.exitCode = 1; });
 }

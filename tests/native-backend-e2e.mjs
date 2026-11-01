@@ -28,7 +28,8 @@ const uiFixture = args.includes("--ui-fixture");
 const swiftEngine = args.find(value => value.startsWith("--swift-engine="))?.slice("--swift-engine=".length);
 const parity = args.includes("--parity");
 const appArgument = args.find(value => !value.startsWith("--"));
-const application = path.resolve(repository, appArgument ?? "dist-native/Yogurt Manager Native.app");
+// The packaged Node backend (parity oracle) is built by scripts/build-native-legacy.mjs.
+const application = path.resolve(repository, appArgument ?? "dist-native-legacy/Yogurt Manager Native.app");
 const defaultBackend = swiftEngine ? "swift" : "node";
 let engine, engineClosed, engineProtocolError, engineText = "", engineSequence = 0;
 const enginePending = new Map();

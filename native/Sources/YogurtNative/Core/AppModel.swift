@@ -39,7 +39,6 @@ import UniformTypeIdentifiers
         let namespace = options?.verificationRoot.map { SHA256.hash(data: Data($0.path.utf8)).map { String(format: "%02x", $0) }.joined() }
         let storage = KeychainStore(service: namespace.map { "com.yogurt.manager.native.verification.\($0)" } ?? "com.yogurt.manager.native"); keychain = storage; client = APIClient(keychain: storage)
         commands = OperationStore(directory: dataDirectory.appendingPathComponent("unconfigured"))
-        runtime.didExit = { [weak self] in self?.ready = false; self?.startupError = "Backend ປິດແລ້ວ. ລາຍການຄ້າງຍັງຢູ່; ເປີດແອັບໃໝ່ເພື່ອກວດກາ" }
     }
     func start() async {
         guard !booting, !ready else { return }
@@ -61,8 +60,8 @@ import UniformTypeIdentifiers
             commands = OperationStore(directory: dataDirectory.appendingPathComponent("projects/\(scope)"))
             if let review = launch.recoveryReviewFile { try await importLegacyReview(review) }
             startupState = "ກຳລັງເປີດ backend ພາຍໃນແອັບ…"
-            let capability = try await runtime.start(configuration: config, dataRoot: dataDirectory.appendingPathComponent("projects/\(scope)/runtime"))
-            try await client.configure(capability: capability)
+            let engine = try await runtime.start(configuration: config, dataRoot: dataDirectory.appendingPathComponent("projects/\(scope)/runtime"), verification: launch.isVerification)
+            try await client.configure(engine: engine)
             ready = true; needsConfiguration = false
             do { try await refreshSession() } catch { startupError = error.localizedDescription }
         } catch { await runtime.waitForStop(); ready = false; startupError = error.localizedDescription }
@@ -276,5 +275,5 @@ import UniformTypeIdentifiers
             catch { Task { @MainActor in self?.showNotice("ສົ່ງອອກ CSV ບໍ່ໄດ້: \(error.localizedDescription)") } }
         }
     }
-    func shutdown() async { ready = false; await runtime.waitForStop(); try? FileManager.default.removeItem(at: dataDirectory.appendingPathComponent("preview")); if launch?.isVerification == true { try? await keychain.remove("session-cookie"); try? await keychain.remove("configuration-v1") } }
+    func shutdown() async { ready = false; await client.detach(); await runtime.waitForStop(); try? FileManager.default.removeItem(at: dataDirectory.appendingPathComponent("preview")); if launch?.isVerification == true { try? await keychain.remove("session-cookie"); try? await keychain.remove("configuration-v1") } }
 }

@@ -27,4 +27,5 @@ dist-desktop/
 native/.build/
 build/native/
 dist-native/
+dist-native-legacy/
 native/.swiftpm/
