@@ -35,6 +35,17 @@ final class SwiftCredentialsTests: XCTestCase {
         }
     }
 
+    func testEveryLoginExpiryIsAWholeSecondThatVerifies() throws {
+        // Decimal(Double) once produced 1793568528.9999998 for a quarter of logins.
+        var object = payload.object
+        for offset in 0..<500 {
+            let expiry = Date(timeIntervalSince1970: 1_793_568_000 + Double(offset) + 0.4321)
+            object["exp"] = .number(SwiftCredentials.epochSeconds(expiry))
+            let signed = try SwiftCredentials.signSession(.object(object), secret: secret)
+            XCTAssertNotNil(SwiftCredentials.verifySession(signed, secret: secret, now: Date(timeIntervalSince1970: 1_793_000_000)), "offset \(offset)")
+        }
+    }
+
     func testSecureRandomPasswordHashesAndSessionIDs() throws {
         XCTAssertThrowsError(try SwiftCredentials.hashPassword("short"))
         let first = try SwiftCredentials.hashPassword("fifteen-or-more-🔐")

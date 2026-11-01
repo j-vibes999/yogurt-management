@@ -1,6 +1,7 @@
 import XCTest
 import Foundation
 import Darwin
+import CryptoKit
 @testable import YogurtNative
 
 final class SwiftDatabaseTests: XCTestCase {
@@ -14,6 +15,7 @@ final class SwiftDatabaseTests: XCTestCase {
             XCTAssertTrue(options.requiresTLS)
             XCTAssertTrue(options.verifiesCertificateAndHostname)
             XCTAssertEqual(options.tlsServerName, "db.example.supabase.co")
+            XCTAssertEqual(options.tlsConfiguration.trustRoots, .certificates([try SupabaseTrust.root()]))
         }
         let sessionURL = "postgresql://tester:secret@aws-0-example.pooler.supabase.com:5432/postgres?sslmode=require"
         XCTAssertFalse(try SwiftDatabaseOptions(configuration: configuration(sessionURL), verification: false).transactionPooling)
@@ -370,6 +372,48 @@ final class SwiftDatabaseTests: XCTestCase {
         } catch { await database.stop(); await observer.stop(); throw error }
     }
 
+    func testPoolTimeoutNamesTheConnectionFailure() async throws {
+        let plain = try LocalPostgresFixture(); defer { plain.stop() }
+        let secure = try LocalPostgresFixture(tls: true); defer { secure.stop() }
+        let required = "sslmode=require&pool_timeout=1&connect_timeout=2"
+        let cases = [
+            (plain.url.replacingOccurrences(of: "sslmode=disable", with: required), "tls_unavailable"),
+            // A self-signed certificate is exactly what an untrusted Supabase root looked like.
+            (secure.url.replacingOccurrences(of: "@127.0.0.1:", with: "@localhost:").replacingOccurrences(of: "sslmode=disable", with: required), "tls_verification_failed"),
+            (plain.url.replacingOccurrences(of: "tester:", with: "tester:wrong") + "&pool_timeout=1", "authentication_failed")
+        ]
+        for (url, expected) in cases {
+            let database = try SwiftDatabase(configuration: configuration(url), verification: true)
+            try await database.start()
+            do { _ = try await database.rows("SELECT 1", []); XCTFail("\(expected) target answered") }
+            catch { XCTAssertEqual((error as? SwiftDatabaseError)?.code, expected) }
+            await database.stop()
+        }
+        XCTAssertTrue(SwiftDatabaseError("tls_verification_failed").isUnavailable)
+        XCTAssertFalse(SwiftDatabaseError("authentication_failed").isUnavailable)
+    }
+
+    func testReturningWritesDecodeRowsExactly() async throws {
+        let fixture = try LocalPostgresFixture(); defer { fixture.stop() }
+        let database = try SwiftDatabase(configuration: configuration(fixture.url), verification: true)
+        try await database.start()
+        do {
+            try await database.execute("CREATE TABLE ledger (id text PRIMARY KEY, amount numeric(30,6) NOT NULL)", [])
+            let inserted = try await database.returning("INSERT INTO ledger VALUES ($1::text, $2::numeric) RETURNING id, amount", [.string("a"), .number(try SwiftValue.decimal("9007199254740993.123456"))])
+            XCTAssertEqual(inserted.count, 1)
+            XCTAssertEqual(inserted.first?["amount"], .number(try SwiftValue.decimal("9007199254740993.123456")))
+            let updated = try await database.transaction { connection in
+                try await connection.returning("WITH target AS (SELECT $1::text AS id) UPDATE ledger SET amount = amount + 1 FROM target WHERE ledger.id = target.id RETURNING ledger.amount", [.string("a")])
+            }
+            XCTAssertEqual(updated.first?["amount"], .number(try SwiftValue.decimal("9007199254740994.123456")))
+            do { _ = try await database.returning("DELETE FROM ledger WHERE id = $1::text", [.string("a")]); XCTFail("Write without RETURNING reported rows") }
+            catch { XCTAssertEqual((error as? SwiftDatabaseError)?.code, "database_error") }
+            let remaining = try await database.rows("SELECT count(*)::int AS remaining FROM ledger", [])
+            XCTAssertEqual(remaining.first?["remaining"], .number(1))
+            await database.stop()
+        } catch { await database.stop(); throw error }
+    }
+
     private func configuration(_ url: String) -> BackendConfiguration {
         BackendConfiguration(databaseURL: url, sessionSecret: String(repeating: "s", count: 32), legacyReviewed: true)
     }
@@ -400,7 +444,8 @@ final class LocalPostgresFixture {
     private var started = false
     let url: String
 
-    init() throws {
+    /// `tls` serves a fresh self-signed certificate for localhost that no client trusts.
+    init(tls: Bool = false) throws {
         guard FileManager.default.isExecutableFile(atPath: binaries.appendingPathComponent("initdb").path) else { throw XCTSkip("Homebrew PostgreSQL 16 fixture toolset is unavailable") }
         root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("yogurt-swift-foundation-" + UUID().uuidString.lowercased())
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -420,12 +465,39 @@ final class LocalPostgresFixture {
         url = "postgresql://tester:\(password)@127.0.0.1:\(port)/\(database)?sslmode=disable"
         do {
             try run("initdb", ["-D", root.appendingPathComponent("cluster").path, "--username", "tester", "--auth-local=reject", "--auth-host=scram-sha-256", "--pwfile", passwordFile.path, "--encoding=UTF8", "--no-locale"])
-            let config = "\nlisten_addresses='127.0.0.1'\nport=\(port)\nunix_socket_directories=''\nmax_connections=12\nshared_buffers='16MB'\nlog_statement='none'\nlog_min_error_statement='panic'\n"
+            var config = "\nlisten_addresses='127.0.0.1'\nport=\(port)\nunix_socket_directories=''\nmax_connections=12\nshared_buffers='16MB'\nlog_statement='none'\nlog_min_error_statement='panic'\n"
+            if tls {
+                let cluster = root.appendingPathComponent("cluster")
+                try run("/usr/bin/openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=localhost", "-keyout", cluster.appendingPathComponent("server.key").path, "-out", cluster.appendingPathComponent("server.crt").path])
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: cluster.appendingPathComponent("server.key").path)
+                config += "ssl=on\n"
+            }
             let handle = try FileHandle(forWritingTo: root.appendingPathComponent("cluster/postgresql.conf")); try handle.seekToEnd(); try handle.write(contentsOf: Data(config.utf8)); try handle.close()
             try run("pg_ctl", ["-D", root.appendingPathComponent("cluster").path, "-l", root.appendingPathComponent("postgres.log").path, "-w", "-t", "15", "start"])
             started = true
             try run("createdb", ["-h", "127.0.0.1", "-p", String(port), "-U", "tester", database], password: password)
         } catch { stop(); throw error }
+    }
+
+    /// Applies only source-controlled migrations to this newly created loopback scratch DB.
+    func applyRepositoryMigrations() throws {
+        let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let directory = repository.appendingPathComponent("prisma/migrations")
+        // Later migrations read Prisma's own history table, so record each one the way `prisma migrate` does.
+        let psql = ["--dbname", url, "--no-psqlrc", "--set", "ON_ERROR_STOP=1", "--quiet"]
+        try run("psql", psql + ["--command", "CREATE TABLE _prisma_migrations (id varchar(36) PRIMARY KEY, checksum varchar(64) NOT NULL, finished_at timestamptz, migration_name varchar(255) NOT NULL, logs text, rolled_back_at timestamptz, started_at timestamptz NOT NULL DEFAULT now(), applied_steps_count integer NOT NULL DEFAULT 0)"])
+        for migration in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            let sql = migration.appendingPathComponent("migration.sql")
+            if FileManager.default.fileExists(atPath: sql.path) {
+                let name = migration.lastPathComponent
+                guard name.range(of: "^[0-9]{14}_[a-z0-9_]+$", options: .regularExpression) != nil else { throw NativeFailure("Unexpected migration name") }
+                let checksum = SHA256.hash(data: try Data(contentsOf: sql)).map { String(format: "%02x", $0) }.joined()
+                let id = UUID().uuidString.lowercased()
+                try run("psql", psql + ["--command", "INSERT INTO _prisma_migrations (id, checksum, migration_name) VALUES ('\(id)', '\(checksum)', '\(name)')"])
+                try run("psql", psql + ["--file", sql.path])
+                try run("psql", psql + ["--command", "UPDATE _prisma_migrations SET finished_at = now(), applied_steps_count = 1 WHERE id = '\(id)'"])
+            }
+        }
     }
 
     func stop() {
@@ -435,7 +507,7 @@ final class LocalPostgresFixture {
     deinit { stop() }
 
     private func run(_ name: String, _ arguments: [String], password: String? = nil) throws {
-        let process = Process(); process.executableURL = binaries.appendingPathComponent(name); process.arguments = arguments
+        let process = Process(); process.executableURL = name.hasPrefix("/") ? URL(fileURLWithPath: name) : binaries.appendingPathComponent(name); process.arguments = arguments
         process.environment = ["PATH": "/usr/bin:/bin", "HOME": root.path, "LANG": "C", "PGPASSWORD": password ?? ""]
         let output = root.appendingPathComponent("tool-output")
         if !FileManager.default.fileExists(atPath: output.path) { FileManager.default.createFile(atPath: output.path, contents: nil, attributes: [.posixPermissions: 0o600]) }

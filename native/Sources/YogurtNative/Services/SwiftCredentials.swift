@@ -32,6 +32,9 @@ enum SwiftCredentials {
         guard let expectedBytes = decode(expected) else { return false }
         return constantTimeEqual(Array(actual), Array(expectedBytes))
     }
+    /// Whole Unix seconds. Decimal(Double) can turn a whole second into 1793568528.9999998, which
+    /// no verifier (Swift or Node Number.isSafeInteger) accepts, so convert through Int64.
+    static func epochSeconds(_ date: Date) -> Decimal { Decimal(Int64(floor(date.timeIntervalSince1970))) }
     static func createSessionId() throws -> String { encode(Data(try random(32))) }
     static func signSession(_ payload: JSONValue, secret: String) throws -> String {
         // The verifier authenticates original bytes and accepts any valid Node property order.
@@ -58,7 +61,7 @@ enum SwiftCredentials {
               case .string(let tag) = payload["credentialTag"], tag.range(of: sessionPattern, options: .regularExpression) != nil,
               case .number(let expiration) = payload["exp"], expiration <= 9_007_199_254_740_991, expiration >= -9_007_199_254_740_991,
               let integral = try? SwiftValue.rounded(expiration, scale: 0), integral == expiration,
-              expiration > Decimal(floor(now.timeIntervalSince1970)) else { return nil }
+              expiration > epochSeconds(now) else { return nil }
         return payload
     }
     private static func mac(_ bytes: Data, secret: String) -> Data {
