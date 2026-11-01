@@ -1,7 +1,15 @@
 import SwiftUI
 import AppKit
 
-@main struct YogurtNativeApp: App {
+/// The verification engine must start before SwiftUI, AppModel or Keychain initialization.
+@main enum YogurtEntry {
+    static func main() {
+        if CommandLine.arguments.dropFirst().first == SwiftEngineCLI.flag { SwiftEngineCLI.run() }
+        YogurtNativeApp.main()
+    }
+}
+
+struct YogurtNativeApp: App {
     @NSApplicationDelegateAdaptor(YogurtAppDelegate.self) private var delegate
     @StateObject private var model = AppModel()
     init() { Theme.registerFonts() }
@@ -52,7 +60,7 @@ struct NativeRootView: View {
                         if !model.legacyReviewed {
                             HStack { Label("ຍັງບໍ່ໄດ້ກວດກາລາຍການຄ້າງຈາກແອັບເດີມ · ອ່ານຢ່າງດຽວ", systemImage: "exclamationmark.triangle"); Spacer(); Button("ກວດກາ") { recovery = true } }.padding(12).background(Theme.mango.opacity(0.12))
                         }
-                        destination.id(session.userId + ":" + model.selected.rawValue)
+                        destination.id(session.userId + ":" + session.role + ":" + model.selected.rawValue)
                     }.background(Theme.cream)
                     // Stripes filling the empty space below a few rows read as loading placeholders.
                     .tableStyle(.inset(alternatesRowBackgrounds: false))

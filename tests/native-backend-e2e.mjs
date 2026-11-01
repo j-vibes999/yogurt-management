@@ -22,8 +22,18 @@ const scrypt = promisify(scryptCallback);
 const args = process.argv.slice(2);
 const setupOnly = args.includes("--check-setup");
 const uiFixture = args.includes("--ui-fixture");
+// --swift-engine=<YogurtNative binary> drives the in-process Swift engine over its verification
+// stdio frames instead of the packaged Node backend. --parity also starts the packaged Node
+// backend against the same scratch database and compares every native read response.
+const swiftEngine = args.find(value => value.startsWith("--swift-engine="))?.slice("--swift-engine=".length);
+const parity = args.includes("--parity");
 const appArgument = args.find(value => !value.startsWith("--"));
 const application = path.resolve(repository, appArgument ?? "dist-native/Yogurt Manager Native.app");
+const defaultBackend = swiftEngine ? "swift" : "node";
+let engine, engineClosed, engineProtocolError, engineText = "", engineSequence = 0;
+const enginePending = new Map();
+const parityDifferences = [];
+let parityCompared = 0;
 const controller = new AbortController();
 const runningTools = new Set();
 let stage = "setup", checks = 0, requests = 0, supervisor, supervisorClosed, heartbeat;
@@ -71,20 +81,27 @@ async function availablePort(preferred = 0) {
   });
 }
 async function setup() {
-  const appRoot = await fs.realpath(application).catch(() => { throw new CheckFailure("packaged-app-missing"); });
-  const binary = path.join(appRoot, "Contents/Helpers/yogurt-supervisor");
-  const node = path.join(appRoot, "Contents/Resources/runtime/node");
-  const bootstrap = path.join(appRoot, "Contents/Resources/runtime/bootstrap.cjs");
-  const backend = path.join(appRoot, "Contents/Resources/backend");
-  for (const item of [binary, node]) await fs.access(item, constants.X_OK).catch(() => { throw new CheckFailure("packaged-executable-missing"); });
-  for (const item of [bootstrap, path.join(backend, ".next/required-server-files.json"), path.join(backend, "desktop/backend.cjs")]) await fs.access(item).catch(() => { throw new CheckFailure("packaged-backend-missing"); });
+  config = {};
+  if (swiftEngine) {
+    config.swift = await fs.realpath(path.resolve(repository, swiftEngine)).catch(() => { throw new CheckFailure("swift-engine-missing"); });
+    await fs.access(config.swift, constants.X_OK).catch(() => { throw new CheckFailure("swift-engine-not-executable"); });
+  }
+  if (!swiftEngine || parity) {
+    const appRoot = await fs.realpath(application).catch(() => { throw new CheckFailure("packaged-app-missing"); });
+    const binary = path.join(appRoot, "Contents/Helpers/yogurt-supervisor");
+    const node = path.join(appRoot, "Contents/Resources/runtime/node");
+    const bootstrap = path.join(appRoot, "Contents/Resources/runtime/bootstrap.cjs");
+    const backend = path.join(appRoot, "Contents/Resources/backend");
+    for (const item of [binary, node]) await fs.access(item, constants.X_OK).catch(() => { throw new CheckFailure("packaged-executable-missing"); });
+    for (const item of [bootstrap, path.join(backend, ".next/required-server-files.json"), path.join(backend, "desktop/backend.cjs")]) await fs.access(item).catch(() => { throw new CheckFailure("packaged-backend-missing"); });
+    Object.assign(config, { binary, node, bootstrap, backend });
+  }
   pgBin = path.dirname(await executable("initdb"));
   for (const name of ["pg_ctl", "createdb"]) await fs.access(path.join(pgBin, name), constants.X_OK).catch(() => { throw new CheckFailure("postgres-toolset-incomplete"); });
   await fs.access(path.join(repository, "node_modules/prisma/build/index.js"));
-  config = { binary, node, bootstrap, backend };
   if (setupOnly) { console.log("Native backend setup: packaged artifacts and PostgreSQL tools available; processes started=0"); return; }
 
-  if (!uiFixture) await availablePort(43188);
+  if (!uiFixture && config.binary) await availablePort(43188);
   const temporary = await fs.realpath(os.tmpdir());
   scratch = await fs.mkdtemp(path.join(temporary, "yogurt-native-e2e-"));
   await fs.chmod(scratch, 0o700);
@@ -157,10 +174,69 @@ async function fixtures() {
 }
 
 async function startBackend() {
-  stage = "packaged-supervisor-start";
   const dataRoot = path.join(scratch, "runtime"); await fs.mkdir(dataRoot, { mode: 0o700 });
   capability = randomBytes(48).toString("base64url");
+  // Both backends share one secret, so a cookie from either login is valid on the other.
   const secret = randomBytes(48).toString("base64url");
+  if (swiftEngine) await startSwiftEngine(dataRoot, secret);
+  if (config.binary) await startNodeBackend(dataRoot, secret);
+}
+
+async function startSwiftEngine(dataRoot, secret) {
+  stage = "swift-engine-start";
+  engine = spawn(config.swift, ["--yogurt-engine-stdio"], { cwd: scratch, env: minimalEnvironment(), stdio: ["pipe", "pipe", "pipe"] });
+  engineClosed = new Promise(resolve => engine.once("close", (code, signal) => resolve({ code, signal })));
+  engine.stdin.on("error", () => {}); engine.stderr.resume();
+  let ready = false;
+  const started = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new CheckFailure("swift-engine-start-deadline")), 60000);
+    engine.once("error", () => { clearTimeout(timer); reject(new CheckFailure("swift-engine-spawn-failed")); });
+    engine.once("exit", () => {
+      clearTimeout(timer); if (!ready) reject(new CheckFailure("swift-engine-exited-before-ready"));
+      for (const pending of enginePending.values()) pending.reject(new CheckFailure("swift-engine-exited"));
+      enginePending.clear();
+    });
+    engine.stdout.on("data", bytes => {
+      engineText += bytes.toString("utf8");
+      let end;
+      while ((end = engineText.indexOf("\n")) >= 0) {
+        const line = engineText.slice(0, end); engineText = engineText.slice(end + 1);
+        let frame;
+        try { frame = JSON.parse(line); } catch { engineProtocolError = true; reject(new CheckFailure("swift-engine-protocol-json")); return; }
+        if (frame.version !== 1) { engineProtocolError = true; return; }
+        if (frame.type === "ready") { ready = true; clearTimeout(timer); resolve(); }
+        else if (frame.type === "failed") { engineProtocolError = true; clearTimeout(timer); reject(new CheckFailure(`swift-engine-failed-${frame.code}`)); }
+        else if (frame.type === "response") {
+          const pending = enginePending.get(frame.id);
+          if (!pending) { engineProtocolError = true; continue; }
+          enginePending.delete(frame.id); pending.resolve(frame);
+        }
+      }
+    });
+  });
+  engine.stdin.write(`${JSON.stringify({ version: 1, type: "bootstrap", dataRoot, capability, config: { DATABASE_URL: databaseURL, SESSION_SECRET: secret } })}\n`);
+  await started;
+}
+
+async function engineRequest(method, route, headers, payload, signal) {
+  let body = Buffer.alloc(0);
+  if (payload instanceof FormData) {
+    // Serialize the multipart body exactly as fetch would send it.
+    const encoded = new Request("http://engine.invalid/", { method: "POST", body: payload });
+    body = Buffer.from(await encoded.arrayBuffer()); headers["content-type"] = encoded.headers.get("content-type");
+  } else if (payload !== undefined) body = Buffer.from(payload);
+  const id = `r${++engineSequence}`;
+  const frame = await new Promise((resolve, reject) => {
+    const abort = () => { enginePending.delete(id); reject(new CheckFailure("swift-engine-request-deadline")); };
+    signal.addEventListener("abort", abort, { once: true });
+    enginePending.set(id, { resolve: value => { signal.removeEventListener("abort", abort); resolve(value); }, reject });
+    engine.stdin.write(`${JSON.stringify({ version: 1, type: "request", id, method, path: route, headers, body: body.toString("base64") })}\n`);
+  });
+  return { status: frame.status, headers: new Headers(frame.headers), bytes: Buffer.from(frame.body, "base64") };
+}
+
+async function startNodeBackend(dataRoot, secret) {
+  stage = "packaged-supervisor-start";
   supervisor = spawn(config.binary, [config.node, config.bootstrap], { cwd: scratch, env: minimalEnvironment(), stdio: ["pipe", "pipe", "pipe"] });
   supervisorClosed = new Promise(resolve => supervisor.once("close", (code, signal) => resolve({ code, signal })));
   supervisor.stdin.on("error", () => {}); supervisor.stderr.resume();
@@ -189,9 +265,9 @@ async function startBackend() {
   check("supervisor-protocol-is-canonical", !supervisorProtocolError);
 }
 
-async function request(route, { role = "admin", method = "GET", body, key, headers = {}, capabilityHeader = true, discard = false } = {}) {
+async function request(route, { role = "admin", method = "GET", body, key, headers = {}, capabilityHeader = true, discard = false, backend = defaultBackend } = {}) {
   check("request-route-is-local-api", route.startsWith("/api/") || route === "/_desktop/ready");
-  if (supervisorProtocolError) throw new CheckFailure("supervisor-failed-during-requests");
+  if (supervisorProtocolError || engineProtocolError) throw new CheckFailure("supervisor-failed-during-requests");
   if (controller.signal.aborted) throw new CheckFailure("interrupted");
   const identity = role ? identities[role] : undefined;
   const requestHeaders = {
@@ -206,7 +282,15 @@ async function request(route, { role = "admin", method = "GET", body, key, heade
     else { requestHeaders["content-type"] = "application/json"; payload = JSON.stringify(body); }
   }
   requests += 1;
-  const response = await fetch(new URL(route, origin), { method, headers: requestHeaders, body: payload, redirect: "manual", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]) });
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]);
+  if (backend === "swift") {
+    const response = await engineRequest(method, route, requestHeaders, payload, signal);
+    if (discard) return { status: response.status };
+    let data = null;
+    try { data = response.bytes.length ? JSON.parse(response.bytes.toString("utf8")) : null; } catch { /* Binary receipt or protected plain response. */ }
+    return { status: response.status, data, bytes: response.bytes, headers: response.headers };
+  }
+  const response = await fetch(new URL(route, origin), { method, headers: requestHeaders, body: payload, redirect: "manual", signal });
   if (discard) { await response.body?.cancel(); return { status: response.status }; }
   const bytes = Buffer.from(await response.arrayBuffer());
   let data = null;
@@ -289,6 +373,50 @@ async function nativeReads(fixture) {
   equal("production-cannot-create-refills", (await mutation("/api/refills", { storeId: fixture.store.id, items: [{ finishedProductId: fixture.product.id, quantity: 1 }] }, { role: "production" })).status, 403);
   equal("driver-cannot-adjust-materials", (await mutation("/api/inventory/adjust", { rawMaterialId: fixture.milk.id, quantityDelta: "1", reason: "test" }, { role: "driver" })).status, 403);
   equal("operation-account-mismatch-is-rejected", (await mutation("/api/expenses", { category: "other", amount: "1.00" }, { headers: { "X-Operation-User": identities.driver.row.id } })).status, 409);
+}
+
+/** Parity mode: every native read, session and nav-count response must match the Node oracle field by field. */
+async function compareReads(label, fixture) {
+  if (!parity) return;
+  stage = `read-parity-${label}`;
+  const resources = {
+    overview: {}, stores: {}, store: { id: fixture.store.id }, map: {}, refills: {}, restock: { id: fixture.store.id },
+    inventory: {}, production: {}, settlements: { filter: "all", page: "1" }, expenses: { page: "1" }, expense: { id: fixture.expense.id },
+    reports: { period: "today" }, notifications: {}, operations: {}, fridges: {}, audit: { page: "1" }, catalog: {}, closing: { date: "2199-12-31" },
+  };
+  const differences = (left, right, at, found) => {
+    if (found.length >= 40) return;
+    if (Array.isArray(left) && Array.isArray(right)) {
+      if (left.length !== right.length) found.push(`${at}: length ${left.length} != ${right.length}`);
+      for (let index = 0; index < Math.min(left.length, right.length); index += 1) differences(left[index], right[index], `${at}[${index}]`, found);
+    } else if (left && right && typeof left === "object" && typeof right === "object" && !Array.isArray(left) && !Array.isArray(right)) {
+      for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+        if (!(key in right)) found.push(`${at}.${key}: missing in swift (node=${JSON.stringify(left[key])?.slice(0, 120)})`);
+        else if (!(key in left)) found.push(`${at}.${key}: extra in swift (swift=${JSON.stringify(right[key])?.slice(0, 120)})`);
+        else differences(left[key], right[key], `${at}.${key}`, found);
+      }
+    } else if (!Object.is(left, right)) found.push(`${at}: node=${JSON.stringify(left)?.slice(0, 160)} swift=${JSON.stringify(right)?.slice(0, 160)}`);
+  };
+  const compare = async (route, role) => {
+    const [node, swift] = [await request(route, { role, backend: "node" }), await request(route, { role, backend: "swift" })];
+    const found = [];
+    if (node.status !== swift.status) found.push(`status node=${node.status} swift=${swift.status}`);
+    else if (node.status === 200) {
+      const strip = value => value && typeof value === "object" && "generatedAt" in value ? { ...value, generatedAt: "<time>" } : value;
+      differences(strip(node.data), strip(swift.data), "$", found);
+    }
+    if (node.status === 200 && !found.length) parityCompared += 1;
+    for (const item of found) parityDifferences.push(`${label} ${role} ${route} ${item}`);
+  };
+  for (const role of ["admin", "production", "driver"]) {
+    await compare("/api/session", role);
+    await compare("/api/nav-counts", role);
+    for (const [resource, query] of Object.entries(resources)) {
+      const parameters = new URLSearchParams(query).toString();
+      await compare(`/api/native/v1/${resource}${parameters ? `?${parameters}` : ""}`, role);
+    }
+  }
+  check(`read-parity-${label}-collected`, true);
 }
 
 async function replay(route, body, { role = "admin", method = "POST", status = 201 } = {}) {
@@ -430,6 +558,19 @@ async function closingWorkflow() {
   equal("closing-audits-accepted-operations-only", await client.auditLog.count({ where: { entityType: "daily_closing" } }), 2);
 }
 
+async function freshReadAuthorization() {
+  stage = "native-read-fresh-authorization";
+  // The cookie still claims admin. The read handler must use the current database role.
+  await client.user.update({ where: { id: identities.admin.row.id }, data: { role: "driver" } });
+  equal("native-read-role-downgrade-applies-immediately", (await request("/api/native/v1/reports")).status, 403);
+  equal("native-read-downgraded-user-can-read-stores", (await request("/api/native/v1/stores")).status, 200);
+  await client.user.update({ where: { id: identities.admin.row.id }, data: { role: "admin", isActive: false } });
+  equal("native-read-disabled-user-is-rejected", (await request("/api/native/v1/stores")).status, 401);
+  await client.user.update({ where: { id: identities.admin.row.id }, data: { isActive: true } });
+  await client.userSession.deleteMany({ where: { userId: identities.driver.row.id } });
+  equal("native-read-revoked-session-is-rejected", (await request("/api/native/v1/stores", { role: "driver" })).status, 401);
+}
+
 async function keepUIFixture(fixture) {
   stage = "ui-fixture";
   // This mode deliberately leaves 43188 unused: the native app owns its backend.
@@ -457,6 +598,13 @@ async function cleanup() {
     const failures = [];
     clearInterval(heartbeat);
     for (const tool of runningTools) tool.kill("SIGTERM");
+    if (engine) {
+      if (!engine.stdin.destroyed) engine.stdin.end('{"version":1,"type":"shutdown"}\n');
+      if (!await Promise.race([engineClosed.then(() => true), delay(10000).then(() => false)])) {
+        engine.kill("SIGTERM");
+        if (!await Promise.race([engineClosed.then(() => true), delay(6000).then(() => false)])) failures.push("swift-engine-stop-failed");
+      }
+    }
     if (supervisor) {
       if (!supervisor.stdin.destroyed) supervisor.stdin.end('{"version":1,"type":"shutdown"}\n');
       const exited = await Promise.race([supervisorClosed.then(() => true), delay(6000).then(() => false)]);
@@ -489,23 +637,29 @@ for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => {
 });
 
 try {
-  check("known-cli-options", args.every(value => !value.startsWith("--") || ["--check-setup", "--ui-fixture"].includes(value)) && !(setupOnly && uiFixture));
+  check("known-cli-options", args.every(value => !value.startsWith("--") || ["--check-setup", "--ui-fixture", "--parity"].includes(value) || value.startsWith("--swift-engine="))
+    && !(setupOnly && uiFixture) && (!parity || Boolean(swiftEngine)) && (!swiftEngine || !uiFixture));
   await setup();
   if (!setupOnly) {
     const fixture = await fixtures();
     if (uiFixture) await keepUIFixture(fixture);
     else {
-      await startBackend(); await loginRoles(); await nativeReads(fixture);
+      await startBackend(); await loginRoles(); await compareReads("initial", fixture); await nativeReads(fixture);
       await stockWorkflows(fixture); await financeWorkflows(fixture);
-      await receiptsAndExpenses(fixture); await closingWorkflow();
+      await receiptsAndExpenses(fixture); await closingWorkflow(); await compareReads("after-workflows", fixture); await freshReadAuthorization();
       stage = "final-database-invariants";
       equal("no-negative-raw-stock", await client.rawMaterial.count({ where: { currentStock: { lt: 0 } } }), 0);
       equal("no-negative-fridge-stock", await client.fridgeInventory.count({ where: { currentStock: { lt: 0 } } }), 0);
       equal("no-negative-batch-stock", await client.productionBatch.count({ where: { quantityRemaining: { lt: 0 } } }), 0);
-      check("supervisor-retains-canonical-protocol", !supervisorProtocolError);
+      check("supervisor-retains-canonical-protocol", !supervisorProtocolError && !engineProtocolError);
+      stage = "read-parity";
+      check("read-parity-matches-node", parityDifferences.length === 0);
     }
   }
 } catch (error) {
+  // Parity differences come from wholly synthetic fixture data only.
+  if (parity) console.error(`Read parity: identical 200 responses=${parityCompared}; differences=${parityDifferences.length}`);
+  if (parityDifferences.length) console.error(`Read parity differences (${parityDifferences.length}):\n${parityDifferences.slice(0, 80).join("\n")}`);
   // Fixed labels only: no response bodies, financial values, passwords, or URLs.
   const label = error instanceof CheckFailure ? error.message : "unexpected-runtime-failure";
   console.error(`Native backend E2E failed: stage=${stage}; check=${label}`);
@@ -519,5 +673,6 @@ try {
     process.exitCode = 1;
   }
   if (interrupted) process.exitCode = 130;
+  if (parity && !process.exitCode) console.log(`Read parity: identical 200 responses=${parityCompared}; differences=${parityDifferences.length}`);
   if (!process.exitCode && !setupOnly && !uiFixture) console.log(`Native packaged backend E2E passed: checks=${checks}; local requests=${requests}; live configuration used=0.`);
 }
