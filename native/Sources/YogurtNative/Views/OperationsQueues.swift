@@ -95,7 +95,7 @@ struct MapWorkspaceView: View {
                 HStack(spacing: 8) {
                     ForEach(unplaced) { row in
                         Button { placing = row } label: { Label(row.text("name"), systemImage: "mappin.and.ellipse") }
-                            .disabled(model.session?.role != "admin" || !model.canWrite)
+                            .disabled(model.session?.role != "admin" || !model.canWrite || directory.source != "database")
                     }
                 }.padding(.bottom, 2)
             }.scrollIndicators(.never)
@@ -108,7 +108,9 @@ struct MapWorkspaceView: View {
     private func place(_ row: JSONValue, latitude: String, longitude: String) async {
         placeError = nil
         do {
-            _ = try await model.mutate("/api/stores/" + operationsPath(row.id), body: .object(["name": .string(row.text("name")), "latitude": .string(latitude), "longitude": .string(longitude)]), method: "PATCH", durable: false)
+            let fresh = try await model.read("store", query: ["id": row.id])
+            guard fresh.source == "database" else { throw NativeFailure("ກະລຸນາໂຫຼດຂໍ້ມູນຮ້ານລ່າສຸດກ່ອນ") }
+            _ = try await model.mutate("/api/stores/" + operationsPath(row.id), body: .object(["name": .string(fresh.data["store"].text("name")), "latitude": .string(latitude), "longitude": .string(longitude)]), method: "PATCH", durable: false)
             await directory.refresh(); await state.refresh()
             selection = row.id
         } catch { placeError = error.localizedDescription }

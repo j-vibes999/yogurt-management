@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionSecret, SESSION_COOKIE, verifySession, type UserRole } from "@/lib/auth-session";
 import { rolesForApi, rolesForPage } from "@/lib/access-policy";
+import { isNativeResource } from "@/lib/native-access";
 
 const HOST_PATTERN = /^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$/;
 const LOOPBACK_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d{1,5})?$/;
@@ -65,6 +66,11 @@ export async function middleware(request: NextRequest) {
   if (!session) {
     if (pathname.startsWith("/api/")) return secure(NextResponse.json({ error: "ກະລຸນາເຂົ້າລະບົບກ່ອນ" }, { status: 401 }), request);
     return toLogin(request, pathname);
+  }
+  // These read handlers authenticate the database session and current role themselves.
+  // Avoid a second /api/session round trip; never apply this to writes or other APIs.
+  if (request.method === "GET" && pathname.startsWith("/api/native/v1/") && isNativeResource(pathname.slice("/api/native/v1/".length))) {
+    return secure(NextResponse.next(), request);
   }
   const expectedUser=request.headers.get("X-Operation-User");
   if(!["GET","HEAD","OPTIONS"].includes(request.method)&&expectedUser&&expectedUser!==session.userId)return secure(NextResponse.json({error:"ບັນຊີຜູ້ໃຊ້ປ່ຽນແປງ; ກະລຸນາໂຫຼດໜ້າຄືນ",retryable:true},{status:409}), request);

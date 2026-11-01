@@ -63,28 +63,37 @@ enum Destination: String, CaseIterable, Identifiable {
     @Published var error: String?
     @Published var source = ""
     @Published var generatedAt = ""
-    private weak var model: AppModel?
+    private weak var model: (any NativeReadSource)?
     private var resource = ""
     private var query: [String: String] = [:]
     private var generation = 0
     private var owner: String?
-    func load(_ model: AppModel, _ resource: String, query: [String: String] = [:]) async {
+    func load(_ model: any NativeReadSource, _ resource: String, query: [String: String] = [:]) async {
+        if self.resource != resource || self.query != query { data = .null; source = ""; generatedAt = "" }
         self.model = model; self.resource = resource; self.query = query
         await refresh()
+    }
+    private func scope(_ session: NativeSession?) -> String? {
+        session.map { "\($0.userId):\($0.role):\($0.source)" }
     }
     func refresh() async {
         guard let model, !resource.isEmpty else { return }
         generation += 1; let request = generation
-        let currentOwner = model.session?.userId
+        let currentOwner = scope(model.session)
         if owner != currentOwner { data = .null; source = ""; generatedAt = ""; owner = currentOwner }
+        if data == .null, let cached = model.cachedRead(resource, query: query) {
+            data = cached.data; source = "cached"; generatedAt = cached.generatedAt
+        }
         loading = true; error = nil
         do {
             let result = try await model.read(resource, query: query)
-            guard generation == request, model.session?.userId == currentOwner else { return }
+            guard generation == request else { return }
+            guard scope(model.session) == currentOwner else { data = .null; source = ""; generatedAt = ""; loading = false; return }
             data = result.data; source = result.source; generatedAt = result.generatedAt
         } catch is CancellationError { }
         catch {
             guard generation == request else { return }
+            guard scope(model.session) == currentOwner else { data = .null; source = ""; generatedAt = ""; loading = false; return }
             self.error = error.localizedDescription
             if data != .null { source = "stale" }
         }

@@ -3,8 +3,12 @@ import AppKit
 import CryptoKit
 import UniformTypeIdentifiers
 
-@MainActor final class AppModel: ObservableObject {
-    @Published var session: NativeSession?
+@MainActor final class AppModel: ObservableObject, NativeReadSource {
+    @Published var session: NativeSession? {
+        didSet {
+            if session?.userId != oldValue?.userId || session?.role != oldValue?.role || session?.source != oldValue?.source { readCache.invalidate() }
+        }
+    }
     @Published var selected: Destination = .overview
     @Published var contextStoreId: String?
     @Published var notice: String?
@@ -25,6 +29,7 @@ import UniformTypeIdentifiers
     private var configuration: BackendConfiguration?
     private var booting = false
     private var inFlight: Set<String> = []
+    private var readCache = WorkspaceReadCache()
     private let launch: NativeLaunchOptions?
     private var importedLaunchFile = false
     var canWrite: Bool { ready && session?.source == "database" && legacyReviewed }
@@ -120,17 +125,24 @@ import UniformTypeIdentifiers
         guard let fresh = session, fresh.userId == before.userId, fresh.source == "database" else { throw NativeFailure("Session ປ່ຽນແປງ ຫຼືຖານຂໍ້ມູນບໍ່ພ້ອມ. ບໍ່ໄດ້ສົ່ງລາຍການ") }
         return fresh
     }
+    func cachedRead(_ resource: String, query: [String: String] = [:]) -> NativeReadResponse? {
+        guard ready, let session else { return nil }
+        return readCache.value(resource: resource, session: session, query: query)
+    }
     func read(_ resource: String, query: [String: String] = [:]) async throws -> NativeReadResponse {
         guard ready, session != nil, resource.range(of: "^[a-z-]+$", options: .regularExpression) != nil else { throw NativeFailure("ກະລຸນາເຂົ້າລະບົບກ່ອນ") }
         let owner = session
+        let cacheGeneration = readCache.generation
         var parts = URLComponents(); parts.path = "/api/native/v1/\(resource)"
         parts.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
         let result = try await client.send(path: parts.string!)
-        if result.status == 401 || result.status == 503 { try? await refreshSession() }
+        if result.status == 401 || result.status == 403 || result.status == 503 { try? await refreshSession() }
         guard result.successful else { throw NativeFailure(result.error) }
         guard session?.userId == owner?.userId, session?.role == owner?.role else { throw NativeFailure("ບັນຊີຫຼືສິດປ່ຽນແປງ; ກະລຸນາໂຫຼດຂໍ້ມູນຄືນ") }
         let value = try JSONDecoder().decode(NativeReadResponse.self, from: result.bytes)
         guard value.version == 1, value.resource == resource else { throw NativeFailure("ຮຸ່ນຂໍ້ມູນບໍ່ຖືກຕ້ອງ") }
+        guard readCache.generation == cacheGeneration else { throw NativeFailure("ຂໍ້ມູນປ່ຽນແປງແລ້ວ · ກະລຸນາໂຫຼດຄືນ") }
+        if let owner { readCache.store(value, session: owner, query: query, generation: cacheGeneration) }
         return value
     }
     struct PlaceResult: Identifiable, Sendable { let id: String; let name: String; let latitude: Double; let longitude: Double }
@@ -157,6 +169,9 @@ import UniformTypeIdentifiers
     }
     private func perform(_ command: PendingCommand, store: OperationStore) async throws -> JSONValue {
         guard session?.userId == command.userID else { throw NativeFailure("ບັນຊີປ່ຽນແປງ. ລາຍການຄ້າງຖືກເກັບໄວ້") }
+        // Uncertain outcomes invalidate too; a response can be lost after a commit.
+        readCache.invalidate()
+        defer { readCache.invalidate() }
         do {
             if let saved = try await store.outcome(command) {
                 try await store.resolve(command); await refreshPending()

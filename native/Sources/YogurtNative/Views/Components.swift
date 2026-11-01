@@ -21,10 +21,11 @@ struct Workspace<Actions: View, Content: View>: View {
     let title: String
     let subtitle: String
     let domain: WorkDomain
+    let scrollsContent: Bool
     let actions: Actions
     let content: Content
-    init(title: String, subtitle: String = "", domain: WorkDomain, @ViewBuilder actions: () -> Actions, @ViewBuilder content: () -> Content) {
-        self.title = title; self.subtitle = subtitle; self.domain = domain; self.actions = actions(); self.content = content()
+    init(title: String, subtitle: String = "", domain: WorkDomain, scrollsContent: Bool = true, @ViewBuilder actions: () -> Actions, @ViewBuilder content: () -> Content) {
+        self.title = title; self.subtitle = subtitle; self.domain = domain; self.scrollsContent = scrollsContent; self.actions = actions(); self.content = content()
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -38,8 +39,15 @@ struct Workspace<Actions: View, Content: View>: View {
                 HStack(spacing: 10) { actions }.controlSize(.large).fixedSize()
             }.padding(24)
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) { content }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+            if scrollsContent {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) { content }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                // Native tables own scrolling and need a bounded viewport to fill.
+                GeometryReader { viewport in
+                    content.frame(width: viewport.size.width, height: viewport.size.height, alignment: .topLeading)
+                }.padding(24)
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.cream)
     }
@@ -53,7 +61,8 @@ struct ReadStateView<Content: View>: View {
     let content: Content
     /// Forms load reference data with this view too; there the "updated" line is only clutter.
     var showsFreshness = true
-    init(state: FeatureState, showsFreshness: Bool = true, @ViewBuilder content: () -> Content) { self.state = state; self.showsFreshness = showsFreshness; self.content = content() }
+    var fillsHeight = false
+    init(state: FeatureState, showsFreshness: Bool = true, fillsHeight: Bool = false, @ViewBuilder content: () -> Content) { self.state = state; self.showsFreshness = showsFreshness; self.fillsHeight = fillsHeight; self.content = content() }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if let error = state.error {
@@ -65,12 +74,13 @@ struct ReadStateView<Content: View>: View {
             }
             if state.loading { ProgressView(state.data == .null ? "ກຳລັງໂຫຼດ…" : "ກຳລັງອັບເດດ…").controlSize(.small) }
             if state.data != .null {
+                if state.source == "cached" { StatusLabel("ຂໍ້ມູນທີ່ໂຫຼດໄວ້ · ກຳລັງກວດລ່າສຸດ", tone: .info) }
                 if state.source == "demo" { StatusLabel("ຂໍ້ມູນສາທິດ · ບັນທຶກລາຍການບໍ່ໄດ້", tone: .warning) }
                 // One control height for every workspace's search and filter row.
                 content.controlSize(.large)
                 if showsFreshness && !state.generatedAt.isEmpty { Text("ອັບເດດ \(operationsDate(state.generatedAt))").font(Theme.font(11)).foregroundStyle(Theme.muted).textSelection(.enabled) }
             } else if !state.loading && state.error == nil { EmptyNotice(title: "ຍັງບໍ່ມີຂໍ້ມູນ") }
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        }.frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil, alignment: .topLeading)
     }
 }
 

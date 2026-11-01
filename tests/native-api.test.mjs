@@ -251,3 +251,11 @@ test("report data carries the exact half-open Laos date range passed to the exis
   assert.deepEqual(data.range, { from: range.from.toISOString(), to: range.to.toISOString(), timeZone: "Asia/Vientiane" });
   assert.equal((Date.parse(data.range.to) - Date.parse(data.range.from)) / 86400000, 7);
 });
+
+test("native inventory uses one exact material read for its display and edit values", async () => {
+  const f = fixture();
+  const { body: { data } } = await f.request("inventory");
+  assert.deepEqual(data.materials, [{ id: "m-1", code: "MILK", name: "Milk", category: "ingredient", unit: "L", stock: 123.123456, minStock: 5.001, avgCost: 10.9091 }]);
+  assert.equal(data.rawMaterials[0].currentStock, "123.123456");
+  assert.deepEqual(f.calls.map(call => call.name), ["rawMaterial.findMany"]);
+});

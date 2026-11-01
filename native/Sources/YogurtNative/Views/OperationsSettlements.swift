@@ -17,7 +17,7 @@ struct SettlementsView: View {
     var body: some View {
         Workspace(title: "ຮັບເງິນ / ບັນຊີຮ້ານ", subtitle: filter == "all" ? "ປະຫວັດທຸກຮອບ · ຮ້ານດຽວອາດມີຫຼາຍລາຍການ" : "ຮອບລ່າສຸດຕໍ່ຮ້ານ ຕາມສະຖານະທີ່ເລືອກ", domain: Destination.settlements.domain) {
             OperationsReadActions(state: state)
-            Button { export() } label: { Label("ສົ່ງອອກໜ້ານີ້", systemImage: "square.and.arrow.up") }.disabled(rows.isEmpty)
+            Button { export() } label: { Label("ສົ່ງອອກໜ້ານີ້", systemImage: "square.and.arrow.up") }.disabled(rows.isEmpty || state.source != "database")
         } content: {
             ReadStateView(state: state) {
                 VStack(alignment: .leading, spacing: 16) {
@@ -39,7 +39,7 @@ struct SettlementsView: View {
                             TableColumn("ຮ້ານ / ບິນ") { row in
                                 Button { receipt = row } label: {
                                     VStack(alignment: .leading, spacing: 4) { Text(row.text("storeName")).font(Theme.font(14, weight: .semibold)); Text(row.text("receiptNumber").isEmpty ? row.id : row.text("receiptNumber")).font(Theme.font(11)).foregroundStyle(Theme.muted) }
-                                }.buttonStyle(.plain).foregroundStyle(Theme.blue)
+                                }.buttonStyle(.plain).foregroundStyle(Theme.blue).disabled(state.source != "database")
                             }.width(min: 180, ideal: 230)
                             TableColumn("ຮອບ") { row in Text(row.text("periodLabel")) }.width(min: 90, ideal: 110)
                             TableColumn("ຍອດຂາຍ") { row in MoneyText(row["gross"]) }.width(min: 105, ideal: 120)
@@ -50,14 +50,14 @@ struct SettlementsView: View {
                         }.frame(minHeight: 350).tableSurface()
                         .contextMenu(forSelectionType: String.self) { ids in
                             if let id = ids.first, let row = rows.first(where: { $0.id == id }) {
-                                Button("ເບິ່ງໃບເສັດ") { receipt = row }
+                                Button("ເບິ່ງໃບເສັດ") { receipt = row }.disabled(state.source != "database")
                                 Button("ຮັບເງິນຄ້າງ") { payment = row }.disabled(!canPay(row))
                                 Button("ຂໍ້ມູນຮ້ານ") { model.navigate(.stores, storeId: row.text("storeId")) }
                             }
-                        } primaryAction: { ids in if let id = ids.first { receipt = rows.first { $0.id == id } } }
+                        } primaryAction: { ids in if state.source == "database", let id = ids.first { receipt = rows.first { $0.id == id } } }
                         HStack {
                             if let selected = rows.first(where: { $0.id == selection }) {
-                                Button("ເບິ່ງໃບເສັດ") { receipt = selected }
+                                Button("ເບິ່ງໃບເສັດ") { receipt = selected }.disabled(state.source != "database")
                                 Button("ຮັບເງິນຄ້າງ") { payment = selected }.buttonStyle(.borderedProminent).disabled(!canPay(selected))
                             }
                             Spacer()

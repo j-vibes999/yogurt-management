@@ -93,51 +93,141 @@ struct InventoryView: View {
     @ObservedObject var model: AppModel
     @StateObject private var state = FeatureState()
     @State private var query = ""
-    @State private var filter = "all"
+    @State private var category = "all"
+    @State private var stockFilter = "all"
+    @State private var order = "attention"
+    @State private var selection: String?
     @State private var editor: String?
     @State private var selected: JSONValue?
+    @FocusState private var searchFocused: Bool
     private var materials: [JSONValue] { state.data["materials"].array }
-    private var rows: [JSONValue] {
-        materials.filter { row in
-            mgContains(row, query, keys: ["code", "name", "unit"]) &&
-            (filter == "all" || (filter == "low" ? row["stock"].decimal <= row["minStock"].decimal : row.text("category") == filter))
-        }
-    }
+    private var matching: [JSONValue] { inventoryRows(materials, query: query, category: category, status: "all", order: order) }
+    private var rows: [JSONValue] { inventoryRows(materials, query: query, category: category, status: stockFilter, order: order) }
+    private var selectedMaterial: JSONValue? { rows.first { $0.id == selection } }
+    private var lowCount: Int { matching.filter { InventoryStockState($0) != .available }.count }
     private var writable: Bool { model.canWrite && state.source == "database" }
     var body: some View {
-        Workspace(title: "ວັດຖຸດິບ", subtitle: "ຮັບເຂົ້າ, ກວດຈຳນວນ ແລະປັບສະຕັອກ", domain: .inventory) {
-            Button("ສົ່ງອອກ CSV", systemImage: "square.and.arrow.up") { export() }.disabled(rows.isEmpty)
-            Button("ຮັບວັດຖຸດິບ", systemImage: "plus") { editor = "receive" }.buttonStyle(.borderedProminent).disabled(!writable || materials.isEmpty)
+        Workspace(title: "ວັດຖຸດິບ", subtitle: "ກວດສະຕັອກ ແລະເລືອກລາຍການເພື່ອຮັບເຂົ້າ ຫຼືປັບຈຳນວນ", domain: .inventory, scrollsContent: false) {
+            Button { Task { await state.refresh() } } label: { Label("ໂຫຼດຄືນ", systemImage: "arrow.clockwise") }
+                .disabled(state.loading).keyboardShortcut("r", modifiers: .command)
+            Button("CSV", systemImage: "square.and.arrow.up") { export() }.disabled(rows.isEmpty).help("ສົ່ງອອກລາຍການທີ່ສະແດງ")
+            Button("ຮັບວັດຖຸດິບ", systemImage: "plus") { openEditor("receive", row: selectedMaterial) }
+                .buttonStyle(.borderedProminent).tint(Theme.green).disabled(!writable || materials.isEmpty)
         } content: {
-            ReadStateView(state: state) {
-                HStack(spacing: 12) {
-                    TextField("ຄົ້ນຫາຊື່ ຫຼືລະຫັດ", text: $query).textFieldStyle(.roundedBorder)
-                    Picker("ປະເພດ", selection: $filter) {
-                        Text("ທັງໝົດ").tag("all"); Text("ໃກ້ໝົດ").tag("low")
-                        Text("ສ່ວນປະກອບ").tag("ingredient"); Text("ບັນຈຸພັນ").tag("packaging")
-                    }.frame(width: 220)
-                    Button("ໂຫຼດຄືນ", systemImage: "arrow.clockwise") { Task { await state.refresh() } }
-                }.controlSize(.large)
-                if rows.isEmpty { EmptyNotice(title: "ບໍ່ພົບວັດຖຸດິບ", detail: "ປ່ຽນຄຳຄົ້ນຫາ ຫຼືຕົວກອງ", symbol: "shippingbox") }
-                else {
-                    Table(rows) {
-                        TableColumn("ວັດຖຸດິບ") { row in VStack(alignment: .leading, spacing: 3) { Text(row.text("name")); Text(row.text("code")).font(Theme.font(12)).foregroundStyle(Theme.muted) } }.width(min: 180)
-                        TableColumn("ຄົງເຫຼືອ") { row in Text("\(row.text("stock")) \(row.text("unit"))").monospacedDigit() }
-                        TableColumn("ຈຸດເຕືອນ") { row in Text("\(row.text("minStock")) \(row.text("unit"))").monospacedDigit() }
-                        TableColumn("ຕົ້ນທຶນ / ໜ່ວຍ") { row in MoneyText(row["avgCost"]) }
-                        TableColumn("ສະຖານະ") { row in StatusLabel(row["stock"].decimal <= row["minStock"].decimal ? "ໃກ້ໝົດ" : "ພຽງພໍ", tone: row["stock"].decimal <= row["minStock"].decimal ? .warning : .success) }
-                        TableColumn("ຈັດການ") { row in
-                            Menu("ຈັດການ") {
-                                Button("ປັບຈຳນວນ") { selected = row; editor = "adjust" }
-                                Button("ແກ້ໄຂ / ກວດນັບ") { selected = rawMaterial(row); editor = "edit" }
-                            }.disabled(!writable)
-                        }.width(120)
-                    }.frame(minHeight: 340).tableSurface()
-                }
+            ReadStateView(state: state, showsFreshness: false, fillsHeight: true) {
+                VStack(alignment: .leading, spacing: 12) {
+                    filters
+                    VStack(spacing: 0) {
+                        if rows.isEmpty { emptyState.frame(maxWidth: .infinity, maxHeight: .infinity) }
+                        else { materialTable }
+                        Divider()
+                        selectionActions
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                    .background(Theme.surface).tableSurface()
+                    HStack(spacing: 12) {
+                        Text("ສະແດງ \(rows.count) ຈາກ \(materials.count) ລາຍການ")
+                        Spacer()
+                        if !state.generatedAt.isEmpty { Text("ອັບເດດ \(operationsDate(state.generatedAt))") }
+                    }.font(Theme.font(11)).foregroundStyle(Theme.muted)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .task { await state.load(model, "inventory") }
+        .onChange(of: rows.map(\.id)) { _, ids in if let selection, !ids.contains(selection) { self.selection = nil } }
         .sheet(isPresented: Binding(get: { editor != nil }, set: { if !$0 { editor = nil; selected = nil } })) { inventoryEditor }
+        .background { Button("") { searchFocused = true }.keyboardShortcut("f", modifiers: .command).hidden().accessibilityHidden(true) }
+    }
+    private var filters: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 16) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
+                    TextField("ຄົ້ນຫາຊື່, ລະຫັດ ຫຼືໜ່ວຍ…", text: $query).textFieldStyle(.plain).focused($searchFocused)
+                        .accessibilityLabel("ຄົ້ນຫາວັດຖຸດິບ")
+                    if !query.isEmpty {
+                        Button { query = ""; searchFocused = true } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain).foregroundStyle(Theme.muted).accessibilityLabel("ລ້າງຄຳຄົ້ນຫາ")
+                    }
+                }.padding(.horizontal, 12).frame(minWidth: 190, minHeight: 40).background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(searchFocused ? Theme.purple : Theme.border, lineWidth: searchFocused ? 2 : 1))
+                Picker("ປະເພດ", selection: $category) {
+                    Text("ທັງໝົດ").tag("all"); Text("ສ່ວນປະກອບ").tag("ingredient"); Text("ບັນຈຸພັນ").tag("packaging")
+                }.frame(width: 210)
+                Picker("ລຽງ", selection: $order) {
+                    Text("ຕ້ອງເຕີມກ່ອນ").tag("attention"); Text("ຊື່ວັດຖຸດິບ").tag("name")
+                }.frame(width: 185)
+            }
+            Picker("ສະຖານະສະຕັອກ", selection: $stockFilter) {
+                Text("ທັງໝົດ (\(matching.count))").tag("all")
+                Text("ຕ້ອງເຕີມ (\(lowCount))").tag("low")
+                Text("ພຽງພໍ (\(matching.count - lowCount))").tag("available")
+            }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 480)
+        }
+    }
+    private var materialTable: some View {
+        Table(rows, selection: $selection) {
+            TableColumn("ວັດຖຸດິບ") { row in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.text("name")).font(Theme.font(14, weight: .semibold)).lineLimit(1).help(row.text("name"))
+                    Text(row.text("code")).font(Theme.font(11)).foregroundStyle(rowStyle(row, normal: Theme.muted))
+                }.padding(.vertical, 4)
+            }.width(min: 180, ideal: 280)
+            TableColumn("ປະເພດ") { row in Text(row.text("category") == "packaging" ? "ບັນຈຸພັນ" : "ສ່ວນປະກອບ").font(Theme.font(12)).foregroundStyle(rowStyle(row, normal: Theme.muted)) }.width(min: 100, ideal: 115)
+            TableColumn("ຄົງເຫຼືອ") { row in
+                Text(amountString(row["stock"].decimal, currency: false) + " " + row.text("unit"))
+                    .font(Theme.font(14, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(rowStyle(row, normal: InventoryStockState(row) == .empty ? Theme.danger : Theme.ink))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }.width(min: 100, ideal: 120)
+            TableColumn("ຈຸດເຕືອນ") { row in Text(amountString(row["minStock"].decimal, currency: false) + " " + row.text("unit")).monospacedDigit().foregroundStyle(rowStyle(row, normal: Theme.muted)).frame(maxWidth: .infinity, alignment: .trailing) }.width(min: 95, ideal: 110)
+            TableColumn("ຕົ້ນທຶນ / ໜ່ວຍ") { row in MoneyText(row["avgCost"]).frame(maxWidth: .infinity, alignment: .trailing) }.width(min: 120, ideal: 145)
+            TableColumn("ສະຖານະ") { row in stockStatus(row) }.width(min: 90, ideal: 110)
+        }
+        .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+        .contextMenu(forSelectionType: String.self) { ids in
+            if let row = rows.first(where: { ids.contains($0.id) }) {
+                Button("ຮັບເຂົ້າລາຍການນີ້", systemImage: "plus") { openEditor("receive", row: row) }.disabled(!writable)
+                Button("ປັບຈຳນວນ", systemImage: "plusminus") { openEditor("adjust", row: row) }.disabled(!writable)
+                Button("ແກ້ໄຂ / ກວດນັບ", systemImage: "square.and.pencil") { openEditor("edit", row: row) }.disabled(!writable)
+            }
+        } primaryAction: { ids in
+            if let row = rows.first(where: { ids.contains($0.id) }), writable { openEditor("edit", row: row) }
+        }
+    }
+    private func stockStatus(_ row: JSONValue) -> some View {
+        let status = InventoryStockState(row)
+        return Label(status == .empty ? "ໝົດ" : status == .low ? "ໃກ້ໝົດ" : "ພຽງພໍ", systemImage: status == .empty ? "exclamationmark.circle" : status == .low ? "exclamationmark.triangle" : "checkmark.circle")
+            .font(Theme.font(12, weight: .medium)).foregroundStyle(rowStyle(row, normal: status == .empty ? Theme.danger : status == .low ? Theme.mango : Theme.green))
+    }
+    private func rowStyle(_ row: JSONValue, normal: Color) -> AnyShapeStyle {
+        selection == row.id ? AnyShapeStyle(.primary) : AnyShapeStyle(normal)
+    }
+    private var selectionActions: some View {
+        HStack(spacing: 12) {
+            if let row = selectedMaterial {
+                Text(row.text("name")).font(Theme.font(13, weight: .semibold)).lineLimit(1)
+                Spacer(minLength: 8)
+                Button("ຮັບເຂົ້າ", systemImage: "plus") { openEditor("receive", row: row) }.disabled(!writable)
+                Button("ປັບຈຳນວນ", systemImage: "plusminus") { openEditor("adjust", row: row) }.disabled(!writable)
+                Button("ແກ້ໄຂ / ກວດນັບ", systemImage: "square.and.pencil") { openEditor("edit", row: row) }.disabled(!writable)
+            } else {
+                Label("ເລືອກວັດຖຸດິບໃນຕາຕະລາງ ເພື່ອຮັບເຂົ້າ, ປັບຈຳນວນ ຫຼືແກ້ໄຂ", systemImage: "cursorarrow.click")
+                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                Spacer(minLength: 0)
+            }
+        }.padding(.horizontal, 16).frame(minHeight: 56).background(Theme.surfaceSoft)
+    }
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            EmptyNotice(title: materials.isEmpty ? "ຍັງບໍ່ມີວັດຖຸດິບ" : "ບໍ່ພົບລາຍການທີ່ກົງກັນ", detail: materials.isEmpty ? "ເພີ່ມວັດຖຸດິບຈາກໜ້າຈັດການລະບົບ" : "ລອງປ່ຽນຄຳຄົ້ນຫາ, ປະເພດ ຫຼືສະຖານະສະຕັອກ", symbol: "archivebox")
+            if !materials.isEmpty { Button("ສະແດງວັດຖຸດິບທັງໝົດ") { query = ""; category = "all"; stockFilter = "all" } }
+        }
+    }
+    private func openEditor(_ action: String, row: JSONValue?) {
+        guard writable else { return }
+        selected = action == "edit" ? row.map(rawMaterial) : row
+        editor = action
     }
     private func rawMaterial(_ row: JSONValue) -> JSONValue {
         state.data["rawMaterials"].array.first { $0.id == row.id } ?? row
@@ -151,7 +241,7 @@ struct InventoryView: View {
                 EditorField(key: "supplierName", label: "ຜູ້ສະໜອງ", required: true).half(),
                 EditorField(key: "purchaseDate", label: "ວັນທີຊື້", kind: .date, required: true).half(),
                 EditorField(key: "note", label: "ໝາຍເຫດ", kind: .multiline)
-            ], initial: ["purchaseDate": businessDateString(Date())], saveLabel: "ຮັບເຂົ້າສາງ", summary: { values in
+            ], initial: ["purchaseDate": businessDateString(Date()), "rawMaterialId": selected?.id ?? ""], saveLabel: "ຮັບເຂົ້າສາງ", summary: { values in
                 guard let quantity = Decimal(string: values["quantity", default: ""]), let price = Decimal(string: values["unitPrice", default: ""]), quantity > 0, price >= 0 else { return nil }
                 return "ລວມ " + amountString(quantity * price)
             }) { values in
@@ -774,8 +864,9 @@ struct ReportsView: View {
     }
     private func reload() async {
         let requested = period
+        // Cached results are keyed to this period too, including when refresh fails.
+        dataPeriod = requested
         await state.load(model, "reports", query: ["period": requested])
-        if state.error == nil, period == requested { dataPeriod = requested }
     }
     private func export() {
         let keys = ["storeName", "gross", "storeShare", "productCost", "wasteCost", "electricity", "transport", "otherExpenses", "expenseTotal", "profit", "electricityBudget"]

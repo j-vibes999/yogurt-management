@@ -7,7 +7,7 @@ import { businessDateString, businessReportRange, parseDateOnly } from "@/lib/da
 import { dailyClosingSnapshot } from "@/lib/daily-closing";
 import { loadBackupReadiness } from "@/lib/backup-readiness";
 import {
-  getDashboardData, getExpensesData, getFridgesData, getInventoryData, getMapData,
+  getDashboardData, getExpensesData, getFridgesData, getMapData,
   getNotificationsData, getProductionData, getRefillsData, getReportsData,
   getRestockStoreData, getSettlementsData, getStoreOptions, getStoresData,
   type DataSource, type NotificationView,
@@ -179,8 +179,11 @@ export async function loadNativeData(resource: NativeResource, query: NativeQuer
     }
     case "restock": return restockDetail(query.id!);
     case "inventory": {
-      const [display, rawMaterials] = await Promise.all([getInventoryData(), materials()]);
-      return result({ ...display, rawMaterials });
+      const rawMaterials = await materials();
+      return result({ source: "database", rawMaterials, materials: rawMaterials.map(row => ({
+        id: row.id, code: row.code, name: row.name, category: row.category, unit: row.unit,
+        stock: Number(row.currentStock), minStock: Number(row.minStockAlert), avgCost: Number(row.avgCostPerUnit),
+      })) });
     }
     case "production": {
       const [display, rawMaterials, planner] = await Promise.all([getProductionData({ historyPage: query.historyPage }), materials(), recipes()]);
