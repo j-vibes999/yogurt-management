@@ -8,8 +8,13 @@ struct MapWorkspaceView: View {
     @State private var filter = "all"
     @State private var selection: String?
     @State private var listOnly = false
-    @State private var position: MapCameraPosition = .automatic
+    @State private var camera = StreetMapDefaults.region(around: [])
+    @State private var cameraID = 0
     @State private var detail: JSONValue?
+    /// Every store, so stores without coordinates (absent from the map data) can be placed.
+    @StateObject private var directory = FeatureState()
+    @State private var placing: JSONValue?
+    @State private var placeError: String?
     private var rows: [JSONValue] {
         state.data["stores"].array.filter { row in
             (query.isEmpty || [row.text("name"), row.text("address"), row.text("phone"), row.text("assetCode")].joined(separator: " ").localizedCaseInsensitiveContains(query)) &&
@@ -17,21 +22,20 @@ struct MapWorkspaceView: View {
         }
     }
     private var selected: JSONValue? { rows.first { $0.id == selection } }
-    /// `.automatic` zooms a single marker past the deepest map tiles, leaving an empty grid.
-    private var allStoresPosition: MapCameraPosition {
-        let latitudes = rows.map { $0["latitude"].double }, longitudes = rows.map { $0["longitude"].double }
-        guard let south = latitudes.min(), let north = latitudes.max(), let west = longitudes.min(), let east = longitudes.max() else { return .automatic }
-        return .region(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: (south + north) / 2, longitude: (west + east) / 2),
-                                          span: MKCoordinateSpan(latitudeDelta: max((north - south) * 1.4, 0.02), longitudeDelta: max((east - west) * 1.4, 0.02))))
+    private var pins: [StreetMapPin] {
+        rows.map { StreetMapPin(id: $0.id, title: $0.text("name"), latitude: $0["latitude"].double, longitude: $0["longitude"].double, warning: $0["lowStock"].bool || $0["due"].bool) }
     }
+    private var unplaced: [JSONValue] { directory.data["stores"].array.filter { $0["latitude"] == .null || $0["longitude"] == .null } }
+    private func showAll() { camera = StreetMapDefaults.region(around: pins); cameraID += 1 }
     var body: some View {
         Workspace(title: "ແຜນທີ່ຮ້ານ", subtitle: "ເລືອກຮ້ານເພື່ອເບິ່ງສິນຄ້າ ແລະວຽກທີ່ຕ້ອງເຮັດ", domain: Destination.map.domain) {
             OperationsReadActions(state: state)
             Toggle("ລາຍການຢ່າງດຽວ", isOn: $listOnly).toggleStyle(.button)
-            Button("ສະແດງທຸກຮ້ານ") { position = allStoresPosition; selection = nil }.disabled(listOnly)
+            Button("ສະແດງທຸກຮ້ານ") { showAll(); selection = nil }.disabled(listOnly)
         } content: {
             ReadStateView(state: state) {
                 VStack(spacing: 16) {
+                    if !unplaced.isEmpty { unplacedPanel }
                     HStack {
                         TextField("ຄົ້ນຫາຮ້ານ ຫຼືລະຫັດຕູ້…", text: $query).textFieldStyle(.roundedBorder)
                         Picker("ຕົວກອງ", selection: $filter) {
@@ -39,12 +43,12 @@ struct MapWorkspaceView: View {
                             Text("ມີຄຳຂໍເຕີມ").tag("refill"); Text("ມີຍອດຄ້າງ").tag("balance")
                         }.frame(width: 190)
                     }
-                    if rows.isEmpty {
-                        EmptyNotice(title: "ບໍ່ພົບຮ້ານທີ່ມີພິກັດ", detail: "ລອງປ່ຽນຕົວກອງ ຫຼືເພີ່ມພິກັດໃນຂໍ້ມູນຮ້ານ", symbol: "map")
+                    if rows.isEmpty && !(query.isEmpty && filter == "all") {
+                        EmptyNotice(title: "ບໍ່ພົບຮ້ານ", detail: "ລອງປ່ຽນຄຳຄົ້ນຫາ ຫຼືຕົວກອງ", symbol: "map")
                     } else {
                         HSplitView {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text("\(rows.count) ຮ້ານ").foregroundStyle(Theme.muted)
+                                Text(rows.isEmpty ? "ຍັງບໍ່ມີຮ້ານທີ່ປັກໝຸດໃນແຜນທີ່" : "\(rows.count) ຮ້ານ").foregroundStyle(Theme.muted)
                                 List(rows, selection: $selection) { row in
                                     VStack(alignment: .leading, spacing: 6) {
                                         Text(row.text("name")).font(Theme.font(14, weight: .semibold))
@@ -55,12 +59,8 @@ struct MapWorkspaceView: View {
                                 if let selected { selectedStore(selected) }
                             }.frame(minWidth: 280, idealWidth: listOnly ? 700 : 320, maxWidth: listOnly ? .infinity : 420)
                             if !listOnly {
-                                Map(position: $position, selection: $selection) {
-                                    ForEach(rows) { row in
-                                        Marker(row.text("name"), systemImage: row["lowStock"].bool ? "exclamationmark" : "storefront", coordinate: CLLocationCoordinate2D(latitude: row["latitude"].double, longitude: row["longitude"].double))
-                                            .tint(row["lowStock"].bool || row["due"].bool ? Theme.mango : Theme.blue).tag(row.id)
-                                    }
-                                }.mapStyle(.standard(elevation: .flat)).mapControls { MapCompass(); MapScaleView() }
+                                StreetMapView(pins: pins, selection: $selection, camera: camera, cameraID: cameraID)
+                                    .overlay(alignment: .bottomLeading) { StreetMapAttribution() }
                                     .frame(minWidth: 330, minHeight: 430).clipShape(RoundedRectangle(cornerRadius: 10))
                                     .accessibilityLabel("ແຜນທີ່ຮ້ານ. ໃຊ້ລາຍການຮ້ານຄຽງຂ້າງໄດ້.")
                             }
@@ -69,14 +69,47 @@ struct MapWorkspaceView: View {
                 }
             }
         }
-        .task { await state.load(model, "map"); if let id = model.contextStoreId { selection = id } else { position = allStoresPosition } }
+        .task {
+            async let stores: Void = directory.load(model, "stores")
+            await state.load(model, "map"); await stores
+            if let id = model.contextStoreId { selection = id } else { showAll() }
+        }
         .onChange(of: model.contextStoreId) { _, id in selection = id }
         .onChange(of: selection) { _, id in
             if let row = rows.first(where: { $0.id == id }) {
-                position = .region(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: row["latitude"].double, longitude: row["longitude"].double), span: MKCoordinateSpan(latitudeDelta: 0.015, longitudeDelta: 0.015)))
+                camera = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: row["latitude"].double, longitude: row["longitude"].double), span: MKCoordinateSpan(latitudeDelta: 0.015, longitudeDelta: 0.015)); cameraID += 1
             }
         }
         .sheet(item: $detail) { row in StoreDetailView(model: model, storeId: row.id, showsClose: true).frame(minWidth: 880, minHeight: 650) }
+        .sheet(item: $placing) { row in
+            StoreLocationPicker(latitude: "", longitude: "") { latitude, longitude in Task { await place(row, latitude: latitude, longitude: longitude) } }
+        }
+    }
+    private var unplacedPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("\(unplaced.count) ຮ້ານຍັງບໍ່ມີຕຳແໜ່ງໃນແຜນທີ່", systemImage: "mappin.slash").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.mango)
+            Text(model.session?.role == "admin" ? "ກົດຊື່ຮ້ານເພື່ອປັກໝຸດຕຳແໜ່ງ. ຮ້ານຈະສະແດງໃນແຜນທີ່ທັນທີ." : "ໃຫ້ຜູ້ຈັດການປັກໝຸດຕຳແໜ່ງຮ້ານເຫຼົ່ານີ້.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(unplaced) { row in
+                        Button { placing = row } label: { Label(row.text("name"), systemImage: "mappin.and.ellipse") }
+                            .disabled(model.session?.role != "admin" || !model.canWrite)
+                    }
+                }.padding(.bottom, 2)
+            }.scrollIndicators(.never)
+            if let placeError { Label(placeError, systemImage: "exclamationmark.triangle").foregroundStyle(Theme.danger) }
+        }
+        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface).tableSurface()
+    }
+    /// Saves only the position; the store's other fields stay as they are.
+    private func place(_ row: JSONValue, latitude: String, longitude: String) async {
+        placeError = nil
+        do {
+            _ = try await model.mutate("/api/stores/" + operationsPath(row.id), body: .object(["name": .string(row.text("name")), "latitude": .string(latitude), "longitude": .string(longitude)]), method: "PATCH", durable: false)
+            await directory.refresh(); await state.refresh()
+            selection = row.id
+        } catch { placeError = error.localizedDescription }
     }
     private func selectedStore(_ row: JSONValue) -> some View {
         VStack(alignment: .leading, spacing: 12) {

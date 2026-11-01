@@ -115,7 +115,8 @@ struct MoneyText: View {
 
 struct EditorChoice: Identifiable { let id: String; let label: String }
 struct EditorField: Identifiable {
-    enum Kind { case text, multiline, money, integer, decimal, date, choice([EditorChoice]) }
+    /// `location` edits this field's latitude together with `longitudeKey`, with a map picker.
+    enum Kind { case text, multiline, money, integer, decimal, date, choice([EditorChoice]), location(longitudeKey: String) }
     let key: String
     let label: String
     var kind: Kind = .text
@@ -135,6 +136,7 @@ struct NativeEditor: View {
     @State private var error: String?
     @State private var busy = false
     @State private var discard = false
+    @State private var picking: EditorField?
     init(title: String, fields: [EditorField], initial: [String: String] = [:], saveLabel: String = "ບັນທຶກ", onSave: @escaping ([String: String]) async throws -> Void) {
         var prepared = initial
         for field in fields where field.required && (prepared[field.key] ?? "").isEmpty { if case .date = field.kind { prepared[field.key] = businessDateString(Date()) } }
@@ -169,11 +171,25 @@ struct NativeEditor: View {
         .confirmationDialog("ຍົກເລີກການແກ້ໄຂ?", isPresented: $discard) {
             Button("ຖິ້ມການແກ້ໄຂ", role: .destructive) { dismiss() }; Button("ກັບໄປແກ້ໄຂ", role: .cancel) {}
         } message: { Text("ຄ່າທີ່ຍັງບໍ່ບັນທຶກຈະຫາຍໄປ") }
+        .sheet(item: $picking) { field in
+            if case .location(let longitudeKey) = field.kind {
+                StoreLocationPicker(latitude: values[field.key] ?? "", longitude: values[longitudeKey] ?? "") { latitude, longitude in
+                    values[field.key] = latitude; values[longitudeKey] = longitude
+                }
+            }
+        }
     }
     @ViewBuilder private func control(_ field: EditorField) -> some View {
         switch field.kind {
         case .choice(let options):
             Picker(field.label, selection: binding(field.key)) { Text("ເລືອກ…").tag(""); ForEach(options) { Text($0.label).tag($0.id) } }.labelsHidden()
+        case .location(let longitudeKey):
+            HStack {
+                TextField("ເສັ້ນຂະໜານ", text: binding(field.key)).frame(maxWidth: 150).accessibilityLabel("ເສັ້ນຂະໜານ")
+                TextField("ເສັ້ນແວງ", text: binding(longitudeKey)).frame(maxWidth: 150).accessibilityLabel("ເສັ້ນແວງ")
+                Button { picking = field } label: { Label("ປັກໝຸດໃນແຜນທີ່", systemImage: "mappin.and.ellipse") }
+                if !(values[field.key] ?? "").isEmpty || !(values[longitudeKey] ?? "").isEmpty { Button("ລ້າງ") { values[field.key] = ""; values[longitudeKey] = "" } }
+            }
         case .multiline: TextEditor(text: binding(field.key)).frame(minHeight: 78).padding(5).overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border))
         case .date:
             HStack {

@@ -133,6 +133,18 @@ import UniformTypeIdentifiers
         guard value.version == 1, value.resource == resource else { throw NativeFailure("ຮຸ່ນຂໍ້ມູນບໍ່ຖືກຕ້ອງ") }
         return value
     }
+    struct PlaceResult: Identifiable, Sendable { let id: String; let name: String; let latitude: Double; let longitude: Double }
+    /// OpenStreetMap place search through the backend's `/api/map/search`, as the web map uses.
+    func searchPlaces(_ query: String) async throws -> [PlaceResult] {
+        guard ready, session != nil else { throw NativeFailure("ກະລຸນາເຂົ້າລະບົບກ່ອນ") }
+        var parts = URLComponents(); parts.path = "/api/map/search"; parts.queryItems = [URLQueryItem(name: "q", value: query)]
+        let reply = try await client.send(path: parts.string!)
+        guard reply.successful else { throw NativeFailure(reply.error) }
+        return reply.data["results"].array.compactMap { row in
+            guard let latitude = Double(row.text("lat")), let longitude = Double(row.text("lon")) else { return nil }
+            return PlaceResult(id: row.text("place_id"), name: row.text("display_name"), latitude: latitude, longitude: longitude)
+        }
+    }
     func mutate(_ path: String, body: JSONValue, method: String = "POST", durable: Bool = true, draftKey: String? = nil) async throws -> JSONValue {
         let owner = try await authorize()
         let lock = "\(owner.userId):\(method):\(path)"

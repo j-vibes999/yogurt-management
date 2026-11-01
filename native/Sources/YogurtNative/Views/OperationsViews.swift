@@ -155,7 +155,7 @@ struct OperationsStoreEditor: View {
             EditorField(key: "contactName", label: "ຜູ້ຕິດຕໍ່"), EditorField(key: "phone", label: "ເບີໂທ"),
             EditorField(key: "whatsapp", label: "WhatsApp"), EditorField(key: "facebook", label: "Facebook"),
             EditorField(key: "address", label: "ທີ່ຢູ່", kind: .multiline),
-            EditorField(key: "latitude", label: "ເສັ້ນຂະໜານ", help: "−90 ຫາ 90"), EditorField(key: "longitude", label: "ເສັ້ນແວງ", help: "−180 ຫາ 180"),
+            EditorField(key: "latitude", label: "ຕຳແໜ່ງຮ້ານໃນແຜນທີ່", kind: .location(longitudeKey: "longitude"), help: "ກົດ “ປັກໝຸດໃນແຜນທີ່” ຫຼືພິມເສັ້ນຂະໜານ (−90 ຫາ 90) ແລະເສັ້ນແວງ (−180 ຫາ 180)"),
             EditorField(key: "commissionPercent", label: "ສ່ວນແບ່ງຮ້ານ (%)", kind: .money, required: true, help: "0–100%"),
             EditorField(key: "monthlyElectricity", label: "ຄ່າໄຟ/ເດືອນ (LAK)", kind: .money, required: true),
             EditorField(key: "fridgeStartDate", label: "ວັນທີເລີ່ມໃຊ້ຕູ້", kind: .date)
@@ -168,6 +168,7 @@ struct OperationsStoreEditor: View {
     var initial: [String: String] {
         guard let store else { return ["commissionPercent": "30", "monthlyElectricity": "200000", "capacityCups": "100", "fridgeModel": "Yogurt Display 100", "fridgeStartDate": businessDateString(Date())] }
         var values = Dictionary(uniqueKeysWithValues: fields.map { ($0.key, store[$0.key].text) })
+        values["longitude"] = store["longitude"].text
         values["commissionPercent"] = NSDecimalNumber(decimal: store["commissionRate"].decimal * 100).stringValue
         return values
     }
